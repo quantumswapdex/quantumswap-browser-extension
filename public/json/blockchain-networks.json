@@ -1,0 +1,11 @@
+{
+  "networks": [
+    {
+      "scanApiDomain": "app.readrelay.quantumcoinapi.com",
+      "blockExplorerDomain": "quantumscan.com",
+      "blockchainName": "MAINNET",
+      "networkId": 123123,
+      "rpcEndpoint": "public.rpc.quantumcoinapi.com"
+    }
+  ]
+}

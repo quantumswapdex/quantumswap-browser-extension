@@ -1,0 +1,60 @@
+.acd-choices {
+    text-align: left;
+    cursor: default;
+    border: 1px solid #ccc;
+    border-top: 0;
+    background-color: #6610f2;
+    box-shadow: rgb(38, 57, 77) 3px 9px 15px -5px;
+    border-radius: 9px;
+    color: white;
+    /* Alter these only if you understand the implications */
+    position: absolute;
+    display: none;
+    z-index: 9999;
+    max-height: 240px; /* Show max 10 choices (without scrolling): i.e., 10 x acd-choice line-height */
+    overflow: hidden;
+    overflow-y: auto;
+    box-sizing: border-box;
+    min-width: 123px;
+    text-transform: uppercase;
+}
+
+.acd-choice {
+    position: relative;
+    padding: 0 .6em;
+    line-height: 24px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-weight: 400;
+    min-width: 200px;
+    text-transform: uppercase;
+}
+
+    .acd-choice.selected {
+        /*background-color: #666;*/
+        color: #73ff00;
+        font-weight: bold;
+    }
+
+.entrybox {
+    background: white;
+    color: black;
+    border-radius: 5px;
+}
+
+.acd-choices::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+}
+
+.acd-choices::-webkit-scrollbar-track {
+    border-radius: 8px;
+    background-color: #e7e7e7;
+    border: 1px solid #cacaca;
+}
+
+.acd-choices::-webkit-scrollbar-thumb {
+    border-radius: 8px;
+    background-color: rgba(55, 35, 57, 0.2);
+}

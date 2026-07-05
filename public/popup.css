@@ -1,0 +1,57 @@
+/*
+ * Browser-extension popup sizing.
+ *
+ * The desktop app ran in a fixed 625x800 Electron window, and the UI's root
+ * elements are sized as width/height: 100% (relative to that window). A browser
+ * action popup instead sizes itself to the document, so without an explicit
+ * pixel size it collapses to a tiny box. We restore the desktop width here.
+ *
+ * Height: restored to the desktop app's 800px so the popup is as tall as the
+ * browser will allow. Note Chrome/Firefox generally clamp toolbar popups to
+ * ~600px tall; where that clamp applies the extra height scrolls. Screens that
+ * need more room also keep their own inner scroll containers (token list, swap
+ * panels, seed words, etc.).
+ */
+
+
+body {
+    width: 625px;
+    height: 600px;
+    margin: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+}
+
+/*
+ * Avoid a double scrollbar. Modal dialogs (.showModal()) are position:fixed
+ * full-viewport overlays with their own overflow:auto, so while one is open
+ * the document/body scrollbar underneath is redundant. Suppress it so only the
+ * dialog's own scrollbar remains.
+ */
+html:has(dialog[open]),
+html:has(dialog[open]) body {
+    overflow: hidden;
+}
+
+/*
+ * Surface sizing (data-view set by js/surface.js). The Overlay (toolbar popup)
+ * keeps the fixed desktop-style box above. The docked (panel), detached (window)
+ * and tab surfaces instead fill the available space so the black header spans
+ * the full width; content stays centered via .center-content-rounded-container
+ * (max-width: 600px; margin: auto). <html> is clipped so <body> is the single
+ * scroll container (no double scrollbar).
+ */
+html[data-view="panel"],
+html[data-view="window"],
+html[data-view="tab"] {
+    width: 100%;
+    height: 100vh;
+    overflow: hidden;
+}
+
+html[data-view="panel"] body,
+html[data-view="window"] body,
+html[data-view="tab"] body {
+    width: 100%;
+    height: 100vh;
+}
