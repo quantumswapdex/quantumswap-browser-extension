@@ -195,7 +195,7 @@
     </dialog>
 
     <dialog id="modalTransactionReview" class="modal" tabindex="-1" role="dialog" style="overflow:hidden;">
-        <div class="modal-content" style="margin:8% auto; max-height:84vh; display:flex; flex-direction:column; overflow:hidden;">
+        <div class="modal-content" style="margin:0% auto; max-height:84vh; display:flex; flex-direction:column; overflow:auto;">
                 <p id="pTxReviewPrompt" style="font-weight:bold;overflow:auto;" class="scrollbar" data-lang-key="review-transaction-prompt" tabindex="4">Please review your transaction request to be sent:</p>
                 <div class="scrollbar" style="overflow:auto; flex:1 1 auto; min-height:0;">
                     <div style="margin-top:8px;">
@@ -295,7 +295,9 @@
                 <span></span><span></span><span></span>
             </div>
             <div class="burger-dropdown" id="burgerDropdown" style="display:none;">
-                <div class="burger-item" id="burgerOverlay" role="button" tabindex="10" onclick="closeBurgerMenu(); return walletOverlay();">
+                <!-- Overlay (anchored action popup) is disabled: it requires action.default_popup,
+                     which is incompatible with dock-on-toolbar-click. Hidden, not removed. -->
+                <div class="burger-item" id="burgerOverlay" role="button" tabindex="10" style="display:none;" onclick="closeBurgerMenu(); return walletOverlay();">
                     <img class="tab-icon" src="assets/svg/overlay.svg" alt="Overlay Icon">
                     <div class="tab-name" data-lang-key="overlay">Overlay</div>
                 </div>

@@ -18,10 +18,12 @@ export default defineConfig({
       128: "/icon/128.png",
     },
     action: {
-      // The toolbar click opens the "Overlay" (the classic action popup) on both
-      // browsers. The Side Panel (Chromium) / sidebar (Firefox) is reachable via
-      // the burger menu's "Dock" action, not on the toolbar click.
-      default_popup: "index.html?view=popup",
+      // The toolbar click opens the docked surface by default: the Side Panel on
+      // Chromium (openPanelOnActionClick, see entrypoints/background.ts) and the
+      // sidebar on Firefox (browserAction.onClicked). No default_popup is set so
+      // the click is delivered to the extension instead of opening the popup; the
+      // other surfaces (Overlay/Pop out/Full screen) stay reachable via the
+      // burger menu, subject to each browser's popup support.
       default_title: "QuantumSwap Wallet",
       default_icon: {
         16: "/icon/16.png",

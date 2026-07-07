@@ -55,3 +55,23 @@ html[data-view="tab"] body {
     width: 100%;
     height: 100vh;
 }
+
+/*
+ * Scroll-container bound for the overlay (toolbar popup).
+ *
+ * .screen-scroll-box (styles.css) bounds the Send/Receive cards with
+ * `calc(100vh - 170px)` so a vertical scrollbar appears when content overflows.
+ * That works on the panel/window/tab surfaces (real windows where `vh` is the
+ * visible viewport), but NOT in the toolbar popup: inside an action popup `vh`
+ * resolves against the un-clamped content height, so the computed max-height is
+ * larger than the ~600px visible popup and the card never clips (no scrollbar).
+ *
+ * The overlay body is a fixed 600px box, so bound the card against that instead.
+ * The 180px offset accounts for the black header + back button above the card and
+ * leaves a bottom gap so the card's rounded corner and shadow clear the popup fold
+ * (the card sits ~143px from the top). This mirrors the fixed-px approach the swap
+ * panel already uses for the same popup limitation.
+ */
+html[data-view="popup"] .screen-scroll-box {
+    max-height: calc(600px - 180px);
+}

@@ -214,12 +214,26 @@ async function initApp() {
     resizeBoxes();
 }
 
+// True when running as the toolbar action popup (the anchored overlay). The
+// surface is set by js/surface.js via the ?view= param and mirrored onto
+// <html data-view="...">. The overlay is a fixed ~600px box, so screen.height
+// (the monitor) is the wrong basis for sizing there.
+function isOverlayPopup() {
+    return document.documentElement.getAttribute("data-view") === "popup";
+}
+
 function resizeBoxes() {
     let maxHeight = "";
     let tokensMaxHeight = "";
     let maxHeightMiddle = "";
-
-    if(screen.height >= 1024) {
+    
+    if(isOverlayPopup()) {
+        // The overlay popup is clamped to ~600px regardless of the monitor, so
+        // use the smallest (else-branch) sizing so cards fit within the fold.
+        maxHeight = "380px";
+        maxHeightMiddle = "400px";
+        tokensMaxHeight = "150px";
+    } else if(screen.height >= 1024) {
         maxHeight = "520px";
         maxHeightMiddle = "550px";
         tokensMaxHeight = "295px";
@@ -887,6 +901,7 @@ async function showWalletScreen() {
     document.getElementById('gradient').style.height = '224px';
     document.getElementById('walletAddress').textContent = currentWalletAddress;
 
+    resizeBoxes();
     initRefreshAccountBalanceBackground();
 
     return false;
