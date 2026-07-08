@@ -1138,8 +1138,32 @@ function showWalletListScreen() {
     return false;
 }
 
+// Publish the currently-open wallet address to chrome.storage.session so the
+// separate dApp approval popup (approve.html) can prefill the default account.
+// Only the public address is shared (never the password); the popup still
+// requires the password to sign. Session storage is in-memory and shared across
+// extension contexts, and is cleared when the browser fully closes.
+function qcSessionSetAddress(address) {
+    try {
+        var api = (typeof browser !== "undefined") ? browser : chrome;
+        if (api && api.storage && api.storage.session) {
+            api.storage.session.set({ qc_current_address: address });
+        }
+    } catch (e) { /* non-fatal */ }
+}
+
+function qcSessionClearAddress() {
+    try {
+        var api = (typeof browser !== "undefined") ? browser : chrome;
+        if (api && api.storage && api.storage.session) {
+            api.storage.session.remove("qc_current_address");
+        }
+    } catch (e) { /* non-fatal */ }
+}
+
 async function setWalletAddressAndShowWalletScreen(address) {
     currentWalletAddress = address;
+    qcSessionSetAddress(address);
     currentBalance = "";
     currentAccountDetails = null;
     document.getElementById("spnAccountBalance").textContent = "";
@@ -1305,6 +1329,8 @@ function createOrRestoreWallet() {
 }
 
 function showUnlockScreen() {
+    // Wallet is locked here; drop the shared default address for the popup.
+    qcSessionClearAddress();
     document.getElementById('unlockScreen').style.display = "block";
     document.getElementById('login-content').style.display = "block";
     document.getElementById('main-content').style.display = "none";

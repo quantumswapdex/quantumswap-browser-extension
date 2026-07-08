@@ -190,6 +190,27 @@ async function computeAddressFromPublicKey(publicKeyBase64) {
     return await CryptoApi.send('ComputeAddress', publicKeyBase64);
 }
 
+// EIP-191 message signing via quantumcoin.js. Returns { signature } (0x hex blob
+// with the public key embedded). signingContext is optional (null => derived
+// from the key type). When advancedSigningEnabled is true and no explicit
+// signingContext is given, the handler signs with the full ("advanced") signing
+// context (wallet.getSigningContext(true)).
+async function signMessage(privateKeyBase64, publicKeyBase64, message, signingContext, advancedSigningEnabled) {
+    return await CryptoApi.send('SignMessage', {
+        privateKey: privateKeyBase64,
+        publicKey: publicKeyBase64,
+        message: message,
+        signingContext: signingContext == null ? null : signingContext,
+        advancedSigningEnabled: advancedSigningEnabled === true
+    });
+}
+
+// Recover the signer address from an EIP-191 message signature. Returns
+// { address }; rejects if the signature does not verify.
+async function verifyMessage(message, signature) {
+    return await CryptoApi.send('VerifyMessage', { message: message, signature: signature });
+}
+
 async function scryptDerive(secret, saltBase64) {
     return await CryptoApi.send('ScryptDerive', { secret: secret, salt: saltBase64 });
 }

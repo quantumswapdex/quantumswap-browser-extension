@@ -413,6 +413,15 @@ window.onclick = function (event) {
 }
 
 function showErrorAndLockup(err) {
+    // In the dApp approval popup (index.html?view=approval) the normal wallet
+    // boot never runs, so langJson and the lockup screens are uninitialized.
+    // Route errors to the approval status line instead of the (throwing) lockup.
+    if (typeof window !== "undefined" && window.__qcApprovalView) {
+        var s = document.getElementById("dappStatus");
+        if (s) s.textContent = (err && err.message) ? err.message : String(err);
+        return;
+    }
+
     modalOkDialog.style.display = "block";
     divSuccess.style.display = "none";
     divWarn.style.display = "block";

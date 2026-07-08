@@ -47,7 +47,12 @@ renderer js  --Api.send-->  preload   renderer js  --Api.send-->  platform-bridg
   uses the Web Crypto API (`crypto.subtle`), which applies PKCS#7 padding and is
   byte-compatible with Node (see `scripts/verify-crypto-parity.cjs`), so
   desktop-created wallets still decrypt here.
-- `entrypoints/background.ts` — a no-op service worker so WXT has an entrypoint.
+- `entrypoints/background.ts` — the service worker. It makes the toolbar action
+  open the docked surface, and acts as the **dApp broker** for the web3 provider
+  (`window.quantumcoin`): it opens approval popups, resolves page requests, and
+  owns post-broadcast confirmation polling. The injected provider and page relay
+  live in `entrypoints/injected.content.ts` (MAIN world) and
+  `entrypoints/relay.content.ts` (isolated world).
 - `public/icon/*.png` — the toolbar/store icons, generated from the same logo the
   Electron app uses (`quantumswap.svg`) by `scripts/build-icons.mjs`, and wired
   into `manifest.icons` / `action.default_icon` in `wxt.config.ts`.
@@ -135,6 +140,50 @@ Temporary add-ons are removed when Firefox closes, and Firefox does not
 auto-reload unpacked builds: run `npm run build:firefox` again, then click
 **Reload** on the `about:debugging` entry.
 
+## Test the web3 dApp example page
+
+The extension injects an EIP-1193-style provider (`window.quantumcoin`) into
+web pages via a content script, so sites can connect, request signatures, and
+send transactions through in-extension approval popups. `examples/dapp.html`
+is a self-contained test page for that flow.
+
+Content scripts only run on `http(s)://` pages (not `file://`), so the example
+**must be served over HTTP**:
+
+1. Build and load the extension (see [Test in Chrome](#test-in-chrome)); make
+   sure you have created/restored a wallet in the popup first.
+2. Serve the `examples/` folder over HTTP from the repo root, e.g.:
+
+   ```bash
+   npx serve examples          # then open the printed http://localhost:3000
+   # or: python -m http.server 3000 --directory examples
+   ```
+
+3. Open `http://localhost:3000/dapp.html` in the browser where the extension is
+   loaded. The page shows **Provider: ready** once `window.quantumcoin` is
+   injected (otherwise confirm the extension is loaded and reload the page).
+4. **Connect** — click **Connect Wallet**. A focused approval popup opens
+   (`index.html?view=approval`); enter your wallet password, pick an account,
+   and click **Sign & Connect**. The page logs the connected address and chain
+   id, and enables the sign/send buttons.
+5. **Sign a message** — edit the message field and click **Sign Message**. Enter
+   your password in the approval popup and click **Sign**; the 0x signature blob
+   is printed to the log.
+6. **Send tokens/coins** — fill in the token contract, recipient address, and
+   quantity, then click **Send Tokens** (or **Send Coins** for the native
+   asset). Review the details in the approval popup, enter your password, and
+   click **Sign & Send**. The page logs the returned `txHash`.
+7. **Confirmation event** — after broadcast, the background service worker polls
+   the scan API and emits a `transactionResult` event. To prove it fires
+   independently of the popup, **close the approval popup right after signing**;
+   the `event: transactionResult { ..., status }` line still appears in the log.
+8. **Disconnect** — click **Disconnect** to revoke the site (`qc_disconnect`);
+   the log shows `accountsChanged []` / `disconnect`.
+
+Everything the page does is mirrored to the on-page **event / result log**, and
+you can watch the background side under `chrome://extensions` → the extension's
+**service worker** → **Inspect**.
+
 ## Smoke-test checklist (both browsers)
 
 Work through these in the popup to confirm parity with the desktop app:
@@ -149,6 +198,8 @@ Work through these in the popup to confirm parity with the desktop app:
 - **Swap** — quote → approve/allowance → swap.
 - **Staking** — deposit / withdraw / pause / resume.
 - **Offline signing**, **QR display**, and **network switching**.
+- **web3 dApp** — connect, sign a message, and send from `examples/dapp.html`
+  (see [Test the web3 dApp example page](#test-the-web3-dapp-example-page)).
 
 ## Icons
 

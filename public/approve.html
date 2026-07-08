@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en" data-view="approval">
+
+<head>
+    <script src="platform-bridge.js"></script>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="assets/fonts/SFPro/stylesheet.css">
+    <link rel="stylesheet" href="assets/fonts/Poppins/stylesheet.css">
+    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="popup.css">
+
+    <title>QuantumSwap</title>
+</head>
+
+<body>
+    <!-- Shared "Please wait…" modal (driven by js/dapp.js during unlock/sign/broadcast). -->
+    <dialog id="modalWaitDialog" class="modal" tabindex="-1" role="dialog">
+        <div class="modal-content">
+            <div style="float:left;" id="divLoadingModalIcon"><img src="assets/icons/loading.gif" style="width:70px;margin-top:12px;margin-right:10px;" alt="Loading" /></div>
+            <div style="margin-bottom:10px;">
+                <div style="padding-bottom:20px;"><p id="pWaitDetails" class="scrollbar" style="overflow:auto;" tabindex="1"></p></div>
+            </div>
+        </div>
+    </dialog>
+
+    <!-- Shared alert modal (kept for parity with the wallet surface). -->
+    <dialog id="modalOkDialog" class="modal" tabindex="-1" role="dialog">
+        <div class="modal-content">
+            <div style="float:left;display:none;" id="divSuccess"><img src="assets/svg/checkmark-circle-outline.svg" style="width:55px;margin-top:12px;" alt="Success" /></div>
+            <div style="float:left;display:none;" id="divWarn"><img src="assets/svg/warning-outline.svg" style="width:55px;margin-top:12px;" alt="Warning" /></div>
+            <div style="margin-bottom:10px;">
+                <div style="padding-bottom:20px;overflow:auto;"><p id="pDetails" class="scrollbar" tabindex="2"></p></div>
+                <div style="display:flex; justify-content:flex-end;">
+                    <button class="close" data-lang-key="ok" role="button" tabindex="1" id="divModalOk">Ok</button>
+                </div>
+            </div>
+        </div>
+    </dialog>
+
+    <!-- Black header banner (logo + title). No burger or network-switch menu on the
+         approval surface. -->
+    <div class="gradient" id="gradient">
+        <div class="logo">
+            <img src="assets/icons/app/dp.png" alt="QuantumSwap" class="logoimg" id="imgLogo">
+        </div>
+        <div class="animate-character" id="divWalletTitle" data-lang-key="title">QuantumSwap</div>
+    </div>
+
+    <!-- dApp approval card (styled like the Send screen). Populated by js/dapp.js. -->
+    <div id="dappApprovalRoot" class="center-content home-content" style="margin-top:20px;">
+        <div class="center-content-rounded-container">
+            <div class="roundex-box scrollbar screen-scroll-box" style="padding-top:15px; padding-bottom:15px;">
+                <div class="heading bold" id="dappTitle" data-lang-key="dapp-connect-title">Connect Wallet</div>
+                <div class="divider"></div>
+
+                <div class="heading medium" style="word-break:break-all; text-align:left;">
+                    <span id="dappOriginLabel" data-lang-key="dapp-requested-by">Requested by:</span>
+                    <span id="dappOrigin" style="font-weight:700;"></span>
+                </div>
+
+                <div id="dappWarning" class="heading medium" data-lang-key="dapp-warning" style="margin-top:10px; color:#a15c00; text-align:left;">
+                    Only continue if you trust this site. It is requesting access to your QuantumCoin wallet.
+                </div>
+
+                <!-- Connect: choose which account to expose -->
+                <div id="dappConnectScreen" class="input_container" style="display:none; margin-top:12px;">
+                    <div class="heading medium" data-lang-key="dapp-account" style="text-align:left;">Account</div>
+                    <div style="display:flex; flex-direction:row; align-items:center; gap:15px; margin-top:4px;">
+                        <div class="copy-container" id="dappCopyAddr" role="button" tabindex="5" title="Copy address"></div>
+                        <div class="scan-container" id="dappExplorerAddr" role="button" tabindex="6" title="Open in block explorer"></div>
+                    </div>
+                    <div id="dappSelectedAddress" style="font-size:0.78em; word-break:break-all; text-align:left; margin-top:6px; color:#000;"></div>
+                    <select id="dappAccountSelect" style="display:none; width:100%; padding:4px; margin-top:6px; background:transparent; border:1px solid #ccc; border-radius:6px; font-size:0.8em; color:black;"></select>
+                    <div class="divider"></div>
+                </div>
+
+                <!-- Sign: show the message to be signed -->
+                <div id="dappSignScreen" style="display:none; margin-top:12px;">
+                    <div class="heading medium" data-lang-key="dapp-message" style="text-align:left;">Message</div>
+                    <pre id="dappSignMessage" class="scrollbar" style="white-space:pre-wrap; word-break:break-word; background:#f4f4f4; padding:8px; border-radius:8px; max-height:160px; overflow:auto; text-align:left;"></pre>
+                </div>
+
+                <!-- Send: review token/coin transfer details -->
+                <div id="dappSendReviewScreen" style="display:none; margin-top:12px; text-align:left;">
+                    <div class="heading medium"><span data-lang-key="dapp-to">To</span>: <span id="dappSendTo" style="font-weight:700; word-break:break-all;"></span></div>
+                    <div class="heading medium" id="dappSendContractRow"><span data-lang-key="dapp-token">Token</span>: <span id="dappSendContract" style="font-weight:700; word-break:break-all;"></span></div>
+                    <div class="heading medium"><span data-lang-key="dapp-amount">Amount</span>: <span id="dappSendAmount" style="font-weight:700;"></span></div>
+                    <div class="heading medium" style="margin-top:8px;" data-lang-key="dapp-payload">Payload</div>
+                    <pre id="dappSendJson" class="scrollbar" style="white-space:pre-wrap; word-break:break-word; background:#f4f4f4; padding:8px; border-radius:8px; max-height:160px; overflow:auto;"></pre>
+                </div>
+
+                <div class="divider"></div>
+
+                <div class="input_container">
+                    <div class="heading medium" data-lang-key="dapp-enter-password" style="text-align:left;">Enter your wallet password</div>
+                    <div style="width:100%;">
+                        <div style="float: left; width: 80%;">
+                            <input class="tab-name" style="text-align: left; width: 100%; border: none; outline: none; font-weight: 500; color: black; letter-spacing: 0.11em;"
+                                   type="password" autocomplete="off" id="dappPassword" name="password" data-placeholder-key="dapp-password-placeholder" placeholder="Enter your wallet password" tabindex="1">
+                        </div>
+                        <div style="float:left;">
+                            <img src="assets/svg/eye-outline.svg" alt="Show Password" data-alt-key="show-password" id="dappPwdEye" style="cursor:pointer;width:20px;" role="button" tabindex="2" />
+                        </div>
+                    </div>
+                    <div class="divider"></div>
+                </div>
+
+                <div id="dappStatus" class="heading medium" style="margin-top:8px; color:#b00020; text-align:left;"></div>
+
+                <div style="display:flex; justify-content:flex-end; gap:15px; margin-top:12px;">
+                    <button class="cancel" id="dappRejectBtn" data-lang-key="dapp-reject" role="button" tabindex="4">Reject</button>
+                    <button class="large_button_container heading large" id="dappApproveBtn" data-lang-key="dapp-approve" role="button" tabindex="3">Approve</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="js/util.js"></script>
+    <script src="js/storage.js"></script>
+    <script src="js/crypto.js"></script>
+    <script src="js/bridge.js"></script>
+    <script src="js/wallet.js"></script>
+    <script src="js/blockchain-network.js"></script>
+    <script src="js/dapp.js"></script>
+</body>
+
+</html>

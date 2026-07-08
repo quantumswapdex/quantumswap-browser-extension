@@ -9,6 +9,7 @@ import {
   isAddress,
   scryptSync,
   randomBytes,
+  verifyMessage,
 } from "quantumcoin";
 
 function base64ToBytes(base64) {
@@ -133,6 +134,34 @@ export default {
     await Initialize(null);
     const pubBytes = Buffer.from(data, "base64");
     return computeAddress(pubBytes);
+  },
+
+  // EIP-191 personal-message signing via quantumcoin.js. The message is hashed
+  // with the Ethereum-compatible prefix (keccak256("\x19Ethereum Signed
+  // Message:\n" + len + message)) and signed with the unlocked post-quantum key.
+  // The returned 0x signature blob embeds the signer's public key, so no
+  // separate public key needs to travel with it (see VerifyMessage).
+  async SignMessage(data) {
+    await Initialize(null);
+    const privBytes = Buffer.from(data.privateKey, "base64");
+    const pubBytes = Buffer.from(data.publicKey, "base64");
+    const wallet = Wallet.fromKeys(privBytes, pubBytes);
+    // An explicit signingContext wins; otherwise, when advanced ("full") signing
+    // is enabled, sign with the full signing context (mirrors chain.js sends).
+    let signingContext = data.signingContext == null ? null : data.signingContext;
+    if (signingContext == null && data.advancedSigningEnabled === true) {
+      signingContext = wallet.getSigningContext(true);
+    }
+    const signature = wallet.signMessageSync(data.message, signingContext);
+    return { signature };
+  },
+
+  // Recover the 32-byte signer address from an EIP-191 message signature.
+  // Throws (INVALID_ARGUMENT) when the signature is malformed or does not verify.
+  async VerifyMessage(data) {
+    await Initialize(null);
+    const address = verifyMessage(data.message, data.signature);
+    return { address };
   },
 
   async IsValidAddress(data) {

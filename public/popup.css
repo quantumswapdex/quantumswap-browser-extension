@@ -75,3 +75,30 @@ html[data-view="tab"] body {
 html[data-view="popup"] .screen-scroll-box {
     max-height: calc(600px - 180px);
 }
+
+/*
+ * dApp approval surface (approve.html sets <html data-view="approval"> statically).
+ * The detached approval popup is opened at 600x800, so fill it and keep <body> as
+ * the single scroll container (the black header + card flow normally above it).
+ */
+html[data-view="approval"] {
+    width: 100%;
+    height: 100vh;
+    overflow: hidden;
+}
+
+html[data-view="approval"] body {
+    width: 100%;
+    height: 100vh;
+    overflow-y: auto;
+}
+
+/*
+ * The shared .cancel button floats right with a negative top margin (tuned for the
+ * confirm dialog). On the approval card it sits in a normal flex row next to the
+ * primary button, so undo the float/offset.
+ */
+#dappApprovalRoot .cancel {
+    float: none;
+    margin-top: 0;
+}

@@ -5,6 +5,12 @@ import { defineConfig } from "wxt";
 // bundle is produced by `scripts/build-bridge.mjs` into `public/platform-bridge.js`
 // and loaded as the first classic script inside `public/index.html`.
 export default defineConfig({
+  // The default esbuild target lowers object-rest destructuring used by WXT's
+  // content-script wrapper below what esbuild can transform. Pin a modern target
+  // (object rest is ES2018) so content scripts build.
+  vite: () => ({
+    build: { target: "es2022" },
+  }),
   manifest: ({ browser }) => ({
     name: "QuantumSwap Browser Extension",
     description: "QuantumSwap Wallet for Chrome and Firefox",
@@ -46,6 +52,8 @@ export default defineConfig({
         }),
     permissions: [
       "clipboardWrite",
+      // dApp broker persists connected-sites in chrome.storage.local.
+      "storage",
       ...(browser === "firefox" ? [] : ["sidePanel"]),
     ],
     host_permissions: ["http://*/*", "https://*/*"],

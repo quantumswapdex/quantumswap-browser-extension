@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>QuantumSwap dApp Test Page</title>
+    <style>
+        :root { color-scheme: light dark; }
+        body {
+            font-family: -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+            max-width: 720px;
+            margin: 32px auto;
+            padding: 0 16px;
+            line-height: 1.5;
+        }
+        h1 { font-size: 1.5rem; }
+        section {
+            border: 1px solid #d0d0d0;
+            border-radius: 12px;
+            padding: 16px;
+            margin: 16px 0;
+        }
+        label { display: block; font-weight: 600; margin-top: 8px; }
+        input {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #c0c0c0;
+            border-radius: 8px;
+            box-sizing: border-box;
+        }
+        button {
+            margin-top: 12px;
+            padding: 10px 16px;
+            border: none;
+            border-radius: 8px;
+            background: #2b6cb0;
+            color: #fff;
+            font-weight: 700;
+            cursor: pointer;
+        }
+        button:disabled { background: #9db8d2; cursor: not-allowed; }
+        button.secondary { background: #718096; }
+        .status { font-weight: 600; }
+        .muted { color: #718096; word-break: break-all; }
+        #log {
+            background: #111;
+            color: #d7f5d7;
+            padding: 12px;
+            border-radius: 8px;
+            height: 240px;
+            overflow: auto;
+            white-space: pre-wrap;
+            word-break: break-word;
+            font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+            font-size: 12px;
+        }
+        .hidden { display: none; }
+    </style>
+</head>
+
+<body>
+    <h1>QuantumSwap dApp Test Page</h1>
+    <p class="muted">
+        Serve this over HTTP (content scripts do not run on <code>file://</code>), load the built
+        extension, then use the buttons below to exercise <code>window.quantumcoin</code>.
+    </p>
+
+    <section id="providerStatus">
+        <div class="status">Provider: <span id="providerState">checking…</span></div>
+    </section>
+
+    <section id="connectSection">
+        <h2>1. Connect</h2>
+        <div>Connected account: <span id="account" class="muted">(none)</span></div>
+        <div>Chain ID: <span id="chainId" class="muted">(none)</span></div>
+        <button id="btnConnect">Connect Wallet</button>
+        <button id="btnDisconnect" class="secondary" disabled>Disconnect</button>
+    </section>
+
+    <section id="signSection">
+        <h2>2. Sign Message</h2>
+        <label for="signInput">Message</label>
+        <input id="signInput" type="text" value="Hello from the QuantumSwap dApp test page!" />
+        <button id="btnSign" disabled>Sign Message</button>
+    </section>
+
+    <section id="sendSection">
+        <h2>3. Send Tokens</h2>
+        <label for="contractInput">Token contract address</label>
+        <input id="contractInput" type="text" placeholder="0x… (32-byte token contract)" />
+        <label for="toInput">To address</label>
+        <input id="toInput" type="text" placeholder="0x… (32-byte recipient)" />
+        <label for="amountInput">Quantity</label>
+        <input id="amountInput" type="text" placeholder="1.0" />
+        <button id="btnSendToken" disabled>Send Tokens</button>
+        <button id="btnSendCoin" class="secondary" disabled>Send Coins (native)</button>
+    </section>
+
+    <section>
+        <h2>Event / result log</h2>
+        <div id="log"></div>
+    </section>
+
+    <script src="dapp.js"></script>
+</body>
+
+</html>
