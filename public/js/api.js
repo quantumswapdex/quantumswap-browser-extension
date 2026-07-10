@@ -131,13 +131,13 @@ async function getTransactionDetails(scanApiDomain, address, pageIndex, isPendin
     for (var i = 0; i < result.items.length; i++) {
         let txn = result.items[i];
 
-        if (txn.hash == null || txn.hash.length < ADDRESS_LENGTH_CHECK || await IsValidAddress(txn.hash) == false) {
+        if (txn.hash == null || txn.hash.length < ADDRESS_LENGTH_CHECK || await isValidQcAddress(txn.hash) == false) {
             throw new Error("invalid hash");
         }
-        if (txn.from == null || txn.from.length < ADDRESS_LENGTH_CHECK || await IsValidAddress(txn.from) == false) {
+        if (txn.from == null || txn.from.length < ADDRESS_LENGTH_CHECK || await isValidQcAddress(txn.from) == false) {
             throw new Error("invalid fromAddress");
         }
-        if (txn.to != null &&  (txn.to.length < ADDRESS_LENGTH_CHECK || await IsValidAddress(txn.to) == false)) {
+        if (txn.to != null &&  (txn.to.length < ADDRESS_LENGTH_CHECK || await isValidQcAddress(txn.to) == false)) {
             throw new Error("invalid toAddress");
         }
 
@@ -245,7 +245,7 @@ async function listAccountTokens(scanApiDomain, address, pageIndex) {
         let tokenName = "";
         let tokenSymbol = "";
 
-        if (token.contractAddress == null || token.contractAddress.length < ADDRESS_LENGTH_CHECK || await IsValidAddress(token.contractAddress) === false) {
+        if (token.contractAddress == null || token.contractAddress.length < ADDRESS_LENGTH_CHECK || await isValidQcAddress(token.contractAddress) === false) {
             throw new Error("invalid contractAddress");
         }
 

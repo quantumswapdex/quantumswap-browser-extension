@@ -3,7 +3,12 @@ const CRYPTO_AES_IV_SIZE = 16;
 const SCRYPT_SALT_SIZE = 32;
 const CRYPTO_SEED_BYTES = 96;
 
-async function IsValidAddress(address) {
+// IMPORTANT: do not name page globals after Go-WASM exports. The quantum-coin
+// SDK registers PascalCase globals (e.g. globalThis.IsValidAddress) and calls
+// them internally; a page function with the same name can clobber the WASM one
+// (script-parse vs WASM-init race) and turn every SDK-internal address check
+// into an infinite recursion through the bridge.
+async function isValidQcAddress(address) {
     return await CryptoApi.send('IsValidAddress', address);
 }
 

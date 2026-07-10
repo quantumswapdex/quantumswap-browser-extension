@@ -870,6 +870,7 @@ button, input[type="submit"], input[type="reset"] {
     border: 1px solid #888;
     width: 80%; 
     border-radius: 15px;
+    max-width:600px;
 }
 
 .close {

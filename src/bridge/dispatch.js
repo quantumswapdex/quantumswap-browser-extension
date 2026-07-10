@@ -20,5 +20,5 @@ export async function dispatch(channel, data) {
   if (typeof handler !== "function") {
     throw new Error("Unknown IPC channel: " + channel);
   }
-  return await handler(data);
+  return handler(data);
 }
