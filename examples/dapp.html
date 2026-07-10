@@ -85,8 +85,29 @@
         <button id="btnSign" disabled>Sign Message</button>
     </section>
 
+    <section id="deploySection">
+        <h2>3. Create ERC20 Token</h2>
+        <p class="muted">
+            Deploys a bundled ERC20 (see <code>examples/DemoERC20.sol</code>) via
+            <code>qc_sendTransaction</code> with no <code>to</code>. The page ABI-encodes the
+            constructor args and sends <code>data = bytecode&nbsp;++&nbsp;abi.encode(name, symbol, supplyWei)</code>
+            together with the <code>abi</code> and <code>bytecode</code> so the wallet can decode and
+            verify (WYSIWYS) before signing. Initial supply is entered in whole tokens and converted to
+            base units (×10¹⁸, 18 decimals) internally. After the deploy confirms, the page reads the
+            receipt back via <code>eth_getTransactionReceipt</code> and fills the new contract address
+            into step 4 below.
+        </p>
+        <label for="tokenNameInput">Token name</label>
+        <input id="tokenNameInput" type="text" placeholder="My Token" value="My Token" />
+        <label for="tokenSymbolInput">Token symbol</label>
+        <input id="tokenSymbolInput" type="text" placeholder="MTK" value="MTK" />
+        <label for="tokenSupplyInput">Initial supply (whole tokens)</label>
+        <input id="tokenSupplyInput" type="text" placeholder="1000000" value="1000000" />
+        <button id="btnDeployToken" disabled>Create ERC20 Token</button>
+    </section>
+
     <section id="sendSection">
-        <h2>3. Send Tokens</h2>
+        <h2>4. Send Tokens</h2>
         <label for="contractInput">Token contract address</label>
         <input id="contractInput" type="text" placeholder="0x… (32-byte token contract)" />
         <label for="toInput">To address</label>

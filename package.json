@@ -19,8 +19,8 @@
     "zip:firefox": "npm run build:bridge && wxt zip -b firefox"
   },
   "dependencies": {
-    "quantumcoin": "^8.0.1",
-    "quantumswap": "^1.0.1",
+    "quantumcoin": "^8.0.2",
+    "quantumswap": "^1.0.2",
     "seed-words": "^1.1.1"
   },
   "devDependencies": {

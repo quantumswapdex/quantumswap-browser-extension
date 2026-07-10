@@ -268,14 +268,14 @@ async function signOfflineSend() {
         CoinTokenToSendName = "coins";
     } else {
         let contractAddress = document.getElementById("txtTokenContractAddress").value;
-        if (contractAddress == null || contractAddress.length < ADDRESS_LENGTH_CHECK || await IsValidAddress(contractAddress) == false) {
+        if (contractAddress == null || contractAddress.length < ADDRESS_LENGTH_CHECK || await isValidQcAddress(contractAddress) == false) {
             showWarnAlert(langJson.errors.quantumAddr);
             return false;
         }
         CoinTokenToSendName = "tokens";
     }
 
-    if (sendAddress == null || sendAddress.length < ADDRESS_LENGTH_CHECK || await IsValidAddress(sendAddress) == false) {
+    if (sendAddress == null || sendAddress.length < ADDRESS_LENGTH_CHECK || await isValidQcAddress(sendAddress) == false) {
         showWarnAlert(langJson.errors.quantumAddr);
         return false;
     }
@@ -451,7 +451,7 @@ async function sendCoins() {
     var contractAddress = document.getElementById("divCoinTokenToSend").textContent;
     let quantityToSend = "";
 
-    if (sendAddress == null || sendAddress.length < ADDRESS_LENGTH_CHECK || await IsValidAddress(sendAddress) == false) {
+    if (sendAddress == null || sendAddress.length < ADDRESS_LENGTH_CHECK || await isValidQcAddress(sendAddress) == false) {
         showWarnAlert(langJson.errors.quantumAddr);
         return false;
     }

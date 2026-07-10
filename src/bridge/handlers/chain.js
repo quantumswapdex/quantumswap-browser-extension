@@ -7,6 +7,7 @@ import { Initialize, Config } from "quantumcoin/config";
 import {
   Wallet,
   Contract,
+  Interface,
   parseUnits,
   formatUnits,
   getAddress,
@@ -79,6 +80,79 @@ function normalizeAmountString(value) {
   if (value == null) return "0";
   return String(value).replace(/,/g, "").trim() || "0";
 }
+
+// ---- generic transaction (WYSIWYS decode/verify) helpers ----
+// Normalize an arbitrary hex-data field to a lowercase, 0x-prefixed string.
+// Empty / null / "0x" all collapse to "0x" (no calldata).
+function normalizeTxDataHex(value) {
+  if (value == null) return "0x";
+  let s = String(value).trim();
+  if (s === "" || s === "0x" || s === "0X") return "0x";
+  if (s.startsWith("0x") || s.startsWith("0X")) s = s.slice(2);
+  return "0x" + s.toLowerCase();
+}
+
+function hexDataEquals(a, b) {
+  return normalizeTxDataHex(a) === normalizeTxDataHex(b);
+}
+
+// Accept the Ethereum wire form (hex-wei, e.g. "0x16345785d8a0000") and, for
+// leniency, a plain decimal-wei string. Returns a BigInt (0n when absent).
+function parseHexOrDecimalWei(value) {
+  if (value == null || value === "") return 0n;
+  if (typeof value === "bigint") return value;
+  const s = String(value).trim();
+  if (s === "") return 0n;
+  try {
+    return BigInt(s);
+  } catch (e) {
+    return 0n;
+  }
+}
+
+// Render a decoded ABI value as a human-readable string for the approval UI.
+// BigInts, byte arrays, nested arrays and tuples are all handled recursively.
+function displayAbiValue(v) {
+  if (v == null) return String(v);
+  if (typeof v === "bigint") return v.toString();
+  if (typeof v === "boolean") return v ? "true" : "false";
+  if (typeof v === "string") return v;
+  if (typeof v === "number") return String(v);
+  if (v instanceof Uint8Array) {
+    let hex = "0x";
+    for (let i = 0; i < v.length; i++) hex += v[i].toString(16).padStart(2, "0");
+    return hex;
+  }
+  if (Array.isArray(v)) return "[" + v.map(displayAbiValue).join(", ") + "]";
+  if (typeof v === "object") {
+    const named = Object.keys(v).filter((k) => !/^\d+$/.test(k));
+    if (named.length) {
+      return "(" + named.map((k) => k + ": " + displayAbiValue(v[k])).join(", ") + ")";
+    }
+    return "(" + Array.from(v).map(displayAbiValue).join(", ") + ")";
+  }
+  return String(v);
+}
+
+// Build the [{ name, type, value }] list the UI renders from an ABI fragment's
+// inputs and a decoded (array-like) argument set.
+function describeAbiArgs(inputs, values) {
+  const arr = Array.from(values || []);
+  const list = [];
+  const inps = Array.isArray(inputs) ? inputs : [];
+  for (let i = 0; i < inps.length; i++) {
+    const inp = inps[i] || {};
+    list.push({
+      name: inp.name || "arg" + i,
+      type: inp.type || "",
+      value: displayAbiValue(arr[i]),
+    });
+  }
+  return list;
+}
+
+const WYSIWYS_MISMATCH_ERROR =
+  "The transaction could not be safely verified: the human-readable details do not match the raw data that would be signed. Rejecting to protect you from a tampered transaction.";
 
 /** Router compares deadline to block.timestamp; use chain time so local nodes do not hit EXPIRED. */
 async function getSwapTxDeadline(provider, futureSeconds) {
@@ -204,6 +278,21 @@ async function buildEstimateGasTx(data, provider) {
     const token = IERC20.connect(getAddress(data.contractAddress), provider);
     const tx = await token.populateTransaction.transfer(getAddress(data.toAddress), amountWei);
     return { ...tx, from: getAddress(fromAddress) };
+  }
+
+  // Generic dApp-requested transaction (mirrors eth_sendTransaction: hex-wei
+  // value, hex data, optional `to` for a plain transfer / contract call, absent
+  // `to` for contract creation). The exact `data`/`value`/`to` are estimated
+  // as-is; no re-derivation here (that is the WYSIWYS verifier's job).
+  if (txKind === "sendTransaction") {
+    const tx = { from: getAddress(fromAddress) };
+    const toAddr = data.toAddress || data.to;
+    if (toAddr != null && String(toAddr).trim() !== "") tx.to = getAddress(toAddr);
+    const dataHex = normalizeTxDataHex(data.data);
+    if (dataHex !== "0x") tx.data = dataHex;
+    const valueWei = parseHexOrDecimalWei(data.value);
+    if (valueWei !== 0n) tx.value = valueWei;
+    return tx;
   }
 
   if (txKind === "approve") {
@@ -971,6 +1060,165 @@ export default {
         amountWei,
         signingOverrides(wallet, data, { gasLimit }),
       );
+      return { success: true, txHash: tx.hash, error: null };
+    } catch (err) {
+      return { success: false, txHash: null, error: formatLocalRpcConnectionError(data.rpcEndpoint, err) };
+    }
+  },
+
+  // Strict "what you see is what you sign" decode + re-encode verification for a
+  // generic dApp transaction. Uses ONLY the raw `data`/`value`/`to` that will be
+  // signed plus the dApp-supplied ABI (+ bytecode for a deployment): it decodes
+  // the calldata, then re-encodes the decoded args and requires the result to
+  // byte-match the original `data`. Any decode error or mismatch returns
+  // { success:false, error } so the UI can reject with an OK-only dialog. The
+  // dApp cannot influence what is displayed except through the exact bytes that
+  // get signed, so a tampered ABI/JSON can never show benign details for hostile
+  // calldata.
+  async DecodeTransaction(data) {
+    try {
+      const chainId = Number(data.chainId);
+      await Initialize(new Config(Number.isInteger(chainId) ? chainId : 0, initRpcUrlForConfig(data.rpcEndpoint)));
+
+      const rawData = normalizeTxDataHex(data.data);
+      const valueWei = parseHexOrDecimalWei(data.value);
+      const valueWeiHex = "0x" + valueWei.toString(16);
+      const valueDecimal = formatUnits(valueWei, 18);
+      const toRaw = data.to == null ? "" : String(data.to).trim();
+      const isDeploy = toRaw === "";
+      const to = isDeploy ? null : toRaw;
+
+      // Plain value transfer: a recipient with no calldata needs no ABI.
+      if (!isDeploy && rawData === "0x") {
+        return {
+          success: true,
+          kind: "transfer",
+          to,
+          method: null,
+          signature: null,
+          selector: null,
+          args: [],
+          valueWeiHex,
+          valueDecimal,
+          error: null,
+        };
+      }
+
+      // Anything carrying calldata (a contract call, or a deployment) MUST be
+      // decodable against a provided ABI; otherwise we cannot honor WYSIWYS.
+      let abi = data.abi;
+      if (typeof abi === "string") {
+        try {
+          abi = JSON.parse(abi);
+        } catch (e) {
+          abi = null;
+        }
+      }
+      if (!Array.isArray(abi) || abi.length === 0) {
+        return {
+          success: false,
+          error:
+            "This request includes contract data but no ABI was provided, so it cannot be verified before signing. Rejecting to avoid approving an unverifiable transaction.",
+        };
+      }
+      const iface = new Interface(abi);
+
+      if (!isDeploy) {
+        const parsed = iface.parseTransaction({ data: rawData, value: valueWei });
+        const reencoded = iface.encodeFunctionData(parsed.fragment, Array.from(parsed.args));
+        if (!hexDataEquals(reencoded, rawData)) {
+          return { success: false, error: WYSIWYS_MISMATCH_ERROR };
+        }
+        return {
+          success: true,
+          kind: "call",
+          to,
+          method: parsed.name,
+          signature: parsed.signature,
+          selector: parsed.selector,
+          args: describeAbiArgs(parsed.fragment.inputs, parsed.args),
+          valueWeiHex,
+          valueDecimal,
+          error: null,
+        };
+      }
+
+      // Contract creation: data must be exactly bytecode ++ abi.encode(ctorArgs).
+      const bytecode = normalizeTxDataHex(data.bytecode);
+      if (bytecode === "0x") {
+        return {
+          success: false,
+          error:
+            "Contract creation requires the contract bytecode to verify the transaction. Rejecting to avoid approving an unverifiable deployment.",
+        };
+      }
+      if (!rawData.startsWith(bytecode)) {
+        return { success: false, error: WYSIWYS_MISMATCH_ERROR };
+      }
+      const ctor = typeof iface.getConstructor === "function" ? iface.getConstructor() : null;
+      const ctorInputs = ctor && Array.isArray(ctor.inputs) ? ctor.inputs : [];
+      const argsHex = "0x" + rawData.slice(bytecode.length);
+      let ctorArgs = [];
+      if (ctorInputs.length) {
+        // Decode the constructor tail by treating the constructor inputs as a
+        // synthetic function's inputs (reuses the hardened calldata decoder).
+        const fn = new Interface([{ type: "function", name: "__ctor", inputs: ctorInputs, outputs: [] }]);
+        const sel = fn.getSighash("__ctor");
+        ctorArgs = fn.decodeFunctionData("__ctor", sel + argsHex.slice(2));
+      } else if (argsHex !== "0x") {
+        // Trailing bytes with no constructor to account for them => cannot verify.
+        return { success: false, error: WYSIWYS_MISMATCH_ERROR };
+      }
+      const rebuilt = normalizeTxDataHex(bytecode + iface.encodeDeploy(Array.from(ctorArgs)).slice(2));
+      if (!hexDataEquals(rebuilt, rawData)) {
+        return { success: false, error: WYSIWYS_MISMATCH_ERROR };
+      }
+      return {
+        success: true,
+        kind: "deploy",
+        to: null,
+        method: "constructor",
+        signature: "constructor(" + ctorInputs.map((x) => x.type).join(",") + ")",
+        selector: null,
+        args: describeAbiArgs(ctorInputs, ctorArgs),
+        valueWeiHex,
+        valueDecimal,
+        error: null,
+      };
+    } catch (err) {
+      return { success: false, error: err && err.message ? err.message : String(err) };
+    }
+  },
+
+  // Sign + broadcast a generic dApp transaction verbatim (the exact `to`/`data`/
+  // `value` that were shown and WYSIWYS-verified). Absent `to` => contract
+  // creation. Never re-derives calldata.
+  async SendTransactionSubmit(data) {
+    try {
+      const chainId = Number(data.chainId);
+      if (!Number.isInteger(chainId)) return { success: false, txHash: null, error: "Invalid chain ID" };
+
+      const provider = createQuantumRpcProvider(data.rpcEndpoint, chainId);
+      if (!provider) return { success: false, txHash: null, error: "Invalid RPC endpoint" };
+      if (!data.privateKey || !data.publicKey)
+        return { success: false, txHash: null, error: "Wallet keys required" };
+
+      await Initialize(new Config(chainId, initRpcUrlForConfig(data.rpcEndpoint)));
+      const privBytes = Buffer.from(data.privateKey, "base64");
+      const pubBytes = Buffer.from(data.publicKey, "base64");
+      const wallet = Wallet.fromKeys(privBytes, pubBytes, provider);
+
+      const dataHex = normalizeTxDataHex(data.data);
+      const valueWei = parseHexOrDecimalWei(data.value);
+      const gasLimit = Number(data.gasLimit) || 21000;
+
+      const txReq = { gasLimit };
+      const toRaw = data.to == null ? "" : String(data.to).trim();
+      if (toRaw !== "") txReq.to = getAddress(toRaw);
+      if (dataHex !== "0x") txReq.data = dataHex;
+      if (valueWei !== 0n) txReq.value = valueWei;
+
+      const tx = await wallet.sendTransaction(signingOverrides(wallet, data, txReq));
       return { success: true, txHash: tx.hash, error: null };
     } catch (err) {
       return { success: false, txHash: null, error: formatLocalRpcConnectionError(data.rpcEndpoint, err) };

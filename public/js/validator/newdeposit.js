@@ -4,7 +4,7 @@ async function newDeposit() {
     let validatorAddress = document.getElementById("txtValidatorAddress").value;
     let validatorDepositCoins = document.getElementById("txtValidatorDepositCoins").value;
 
-    if (validatorAddress == null || validatorAddress.length < ADDRESS_LENGTH_CHECK || await IsValidAddress(validatorAddress) == false) {
+    if (validatorAddress == null || validatorAddress.length < ADDRESS_LENGTH_CHECK || await isValidQcAddress(validatorAddress) == false) {
         showWarnAlert(langJson.errors.quantumAddr);
         return false;
     }

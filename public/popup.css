@@ -90,7 +90,18 @@ html[data-view="approval"] {
 html[data-view="approval"] body {
     width: 100%;
     height: 100vh;
-    overflow-y: auto;
+    /* The card scrolls internally (see .screen-scroll-box rule below), so keep the
+       page itself non-scrolling: no redundant main-window scrollbar. */
+    overflow: hidden;
+}
+
+/*
+ * Bound the approval card so header (116px) + margins + card fit inside the popup
+ * viewport, with the card's own overflow-y:auto handling any excess. Prevents the
+ * whole page from growing past the window and showing a second scrollbar.
+ */
+html[data-view="approval"] .screen-scroll-box {
+    max-height: calc(100vh - 190px);
 }
 
 /*

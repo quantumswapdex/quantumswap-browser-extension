@@ -150,6 +150,18 @@ async function submitSendTokens(payload) {
     return await SwapQuoteApi.send('SendTokensSubmit', payload);
 }
 
+// Strict WYSIWYS decode + re-encode verification of a generic dApp transaction.
+// Returns { success, kind, method, signature, selector, args, valueDecimal, ... }
+// on success, or { success:false, error } on any decode/mismatch failure.
+async function decodeTransaction(payload) {
+    return await SwapQuoteApi.send('DecodeTransaction', payload);
+}
+
+// Sign + broadcast a generic dApp transaction verbatim (verified `to`/`data`/`value`).
+async function submitSendTransaction(payload) {
+    return await SwapQuoteApi.send('SendTransactionSubmit', payload);
+}
+
 async function offlineSignCoinTransaction(payload) {
     return await SwapQuoteApi.send('OfflineSignCoinTransaction', payload);
 }

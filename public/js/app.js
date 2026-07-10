@@ -362,6 +362,23 @@ async function saveSelectedBlockchainNetwork() {
     if (result == false) {
         showWarnAlert(getGenericError(""));
     } else {
+        // Best-effort: notify the dApp broker so connected sites get chainChanged
+        // and the read passthrough retargets the new network's RPC.
+        try {
+            let networkMap = await blockchainNetworksList();
+            let netItem = networkMap.get(parseInt(selectedValue, 10));
+            if (netItem) {
+                let chainId = parseInt(netItem.networkId, 10);
+                qcNotifyActiveNetworkChanged(chainId, {
+                    name: String(netItem.blockchainName),
+                    chainId: chainId,
+                    scanApiDomain: netItem.scanApiDomain,
+                    blockExplorerDomain: netItem.blockExplorerDomain,
+                    rpcEndpoint: netItem.rpcEndpoint,
+                    index: netItem.index != null ? netItem.index : parseInt(selectedValue, 10)
+                });
+            }
+        } catch (e) { /* non-fatal */ }
         await showBlockchainNetworks();
         document.getElementById("spnAccountBalance").textContent = "";
         currentBalance = "";
@@ -1161,9 +1178,33 @@ function qcSessionClearAddress() {
     } catch (e) { /* non-fatal */ }
 }
 
+// Tell the dApp broker (background) that the active wallet changed, so it can
+// repoint every connected site to the new address and emit accountsChanged.
+function qcNotifyActiveAccountChanged(address) {
+    try {
+        var api = (typeof browser !== "undefined") ? browser : chrome;
+        if (api && api.runtime && api.runtime.sendMessage) {
+            api.runtime.sendMessage({ type: "qc-active-account-changed", address: address });
+        }
+    } catch (e) { /* non-fatal */ }
+}
+
+// Tell the dApp broker (background) that the active network changed, so it can
+// repoint every connected site to the new chainId/RPC and emit the standard
+// chainChanged event to connected dApps.
+function qcNotifyActiveNetworkChanged(chainId, network) {
+    try {
+        var api = (typeof browser !== "undefined") ? browser : chrome;
+        if (api && api.runtime && api.runtime.sendMessage) {
+            api.runtime.sendMessage({ type: "qc-active-network-changed", chainId: chainId, network: network });
+        }
+    } catch (e) { /* non-fatal */ }
+}
+
 async function setWalletAddressAndShowWalletScreen(address) {
     currentWalletAddress = address;
     qcSessionSetAddress(address);
+    qcNotifyActiveAccountChanged(address);
     currentBalance = "";
     currentAccountDetails = null;
     document.getElementById("spnAccountBalance").textContent = "";
