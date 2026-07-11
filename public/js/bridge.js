@@ -1,3 +1,5 @@
+"use strict";
+
 async function WriteTextToClipboard(text) {
     await ClipboardApi.send('ClipboardWriteText', text);
 }
@@ -19,12 +21,12 @@ async function GetAppVersion() {
 }
 
 async function ReadFile(seedfile) {
-    array = await FileApi.send('FileApiReadFile', seedfile);
+    const array = await FileApi.send('FileApiReadFile', seedfile);
     return array;
 }
 
 async function getLocalStoragePath() {
-    keyStore = await LocalStorageApi.send('StorageApiGetPath', null);
+    const keyStore = await LocalStorageApi.send('StorageApiGetPath', null);
     return keyStore;
 }
 

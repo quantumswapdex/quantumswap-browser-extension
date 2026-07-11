@@ -31,8 +31,6 @@ a copy-paste example, and there is a runnable reference page at
   - [qc_chainId](#qc_chainid)
   - [qc_getNetwork](#qc_getnetwork)
   - [qc_signMessage](#qc_signmessage)
-  - [qc_sendCoin](#qc_sendcoin)
-  - [qc_sendToken](#qc_sendtoken)
   - [qc_sendTransaction](#qc_sendtransaction)
   - [qc_disconnect](#qc_disconnect)
   - [Read-only JSON-RPC passthrough](#read-only-json-rpc-passthrough)
@@ -75,11 +73,14 @@ Read this first; it prevents the most common mistakes.
   **64 hex characters**. A normal 20-byte (40-hex) Ethereum address is **rejected**
   with a clear error.
 - **`qc_*` method namespace.** Wallet actions use `qc_` methods (for example
-  `qc_requestAccounts`, `qc_sendCoin`). A few Ethereum names are aliased for
+  `qc_requestAccounts`, `qc_sendTransaction`). A few Ethereum names are aliased for
   convenience (see [tooling](#using-with-standard-ethereum-tooling)).
-- **Amounts vs. wei.** `qc_sendCoin` / `qc_sendToken` take a human **decimal**
-  amount (for example `"1.5"`). Only `qc_sendTransaction`'s `value` field uses
-  **wei** (hex like `"0x0"` or a decimal-wei string).
+- **Transfers use `qc_sendTransaction`.** Native coin and ERC20 token transfers
+  both go through `qc_sendTransaction` (the `eth_sendTransaction` equivalent):
+  native via the `value` field, tokens via ERC20 `transfer(...)` calldata to the
+  contract. Its `value` field is **wei** (hex like `"0x0"` or a decimal-wei
+  string). This is the only send path, and it is decode-and-verified (WYSIWYS)
+  before signing.
 - **`chainId` type.** `qc_chainId` returns a **number** (for example `123123`).
   The `chainChanged` event and the `eth_chainId` read method return a **hex
   string** (for example `"0x1e0f3"`). Don't mix them up.
@@ -176,10 +177,10 @@ provider.on("accountsChanged", (accounts) => console.log("accounts:", accounts))
 
 - **Address format:** `0x` + 64 hex chars (32 bytes). Example:
   `0x0e49c26cd1ca19bf8dda2c8985b96783288458754757f4c9e00a5439a7291628`.
-- **Coin/token amounts** (`qc_sendCoin`, `qc_sendToken`): decimal display units,
-  e.g. `"1.5"`. The wallet converts to base units internally.
 - **`qc_sendTransaction` `value`:** wei. Accepts a hex string (`"0x0"`,
-  `"0x16345785d8a0000"`) or a decimal-wei string. Use `"0x0"` for no value.
+  `"0x16345785d8a0000"`) or a decimal-wei string. Use `"0x0"` for no value. This
+  is the field used for native coin transfers; token transfers carry the amount in
+  the ERC20 `transfer(...)` calldata instead.
 - **`data` / `bytecode`:** `0x`-prefixed hex; `data` must have an even number of
   hex digits.
 
@@ -267,39 +268,6 @@ const signature = await provider.request({
 });
 ```
 
-### qc_sendCoin
-
-Send the native coin. **Requires connection.** Opens the approval popup.
-
-- **Params:** `{ to: string, amount: string }` — `amount` in decimal coin units.
-- **Returns:** `{ txHash: string }`.
-
-```js
-const { txHash } = await provider.request({
-  method: "qc_sendCoin",
-  params: { to: "0x<64-hex recipient>", amount: "1.5" }
-});
-```
-
-### qc_sendToken
-
-Send an ERC20-style token. **Requires connection.** Opens the approval popup.
-
-- **Params:** `{ contractAddress: string, to: string, amount: string }` —
-  `amount` in decimal token units.
-- **Returns:** `{ txHash: string }`.
-
-```js
-const { txHash } = await provider.request({
-  method: "qc_sendToken",
-  params: {
-    contractAddress: "0x<64-hex token>",
-    to: "0x<64-hex recipient>",
-    amount: "100"
-  }
-});
-```
-
 ### qc_sendTransaction
 
 The general-purpose transaction method: call a contract method or **deploy** a
@@ -318,6 +286,46 @@ deploy). The wallet decodes your `data` with the ABI, **re-encodes it, and
 byte-compares** against the `data` you sent. If they differ, the transaction is
 rejected — this stops a page from displaying one thing and signing another. The
 value is shown to the user in decimal.
+
+**Native coin transfer.** Set `to` (recipient) and `value` (wei). No `data`:
+
+```js
+const { txHash } = await provider.request({
+  method: "qc_sendTransaction",
+  params: {
+    to: "0x<64-hex recipient>",
+    value: "0x16345785d8a0000" // 0.1 coin in wei (hex), or a decimal-wei string
+  }
+});
+```
+
+**ERC20 token transfer.** Send `transfer(address,uint256)` calldata to the token
+contract, with the matching `abi` so the wallet can decode + verify (WYSIWYS). See
+[`examples/dapp.js`](examples/dapp.js) for the `encodeErc20Transfer` helper:
+
+```js
+// data = 0xa9059cbb ++ pad32(recipient) ++ uint256(amountBaseUnits)
+const data = encodeErc20Transfer(recipient, amountBaseUnits);
+
+const { txHash } = await provider.request({
+  method: "qc_sendTransaction",
+  params: {
+    to: "0x<64-hex token contract>",
+    data,
+    value: "0x0",
+    abi: [{
+      type: "function",
+      name: "transfer",
+      stateMutability: "nonpayable",
+      inputs: [
+        { name: "to", type: "address" },
+        { name: "amount", type: "uint256" }
+      ],
+      outputs: [{ name: "", type: "bool" }]
+    }]
+  }
+});
+```
 
 **Deploy example (ERC20 with `constructor(string,string,uint256)`).** The
 provider does not include an ABI encoder, so the page builds the constructor
@@ -477,8 +485,8 @@ console.log("signature:", signature);
 
 ```js
 const { txHash } = await provider.request({
-  method: "qc_sendCoin",
-  params: { to: recipient, amount: "0.25" }
+  method: "qc_sendTransaction",
+  params: { to: recipient, value: "0x37a07d447a80000" } // 0.25 coin in wei
 });
 console.log("submitted:", txHash);
 ```
@@ -486,9 +494,22 @@ console.log("submitted:", txHash);
 ### 4. Send a token
 
 ```js
+// data = 0xa9059cbb ++ pad32(recipient) ++ uint256(amountBaseUnits)
+const data = encodeErc20Transfer(recipient, amountBaseUnits); // see examples/dapp.js
 const { txHash } = await provider.request({
-  method: "qc_sendToken",
-  params: { contractAddress: token, to: recipient, amount: "100" }
+  method: "qc_sendTransaction",
+  params: {
+    to: token,
+    data,
+    value: "0x0",
+    abi: [{
+      type: "function",
+      name: "transfer",
+      stateMutability: "nonpayable",
+      inputs: [{ name: "to", type: "address" }, { name: "amount", type: "uint256" }],
+      outputs: [{ name: "", type: "bool" }]
+    }]
+  }
 });
 ```
 
@@ -550,8 +571,9 @@ against it:
   so account discovery works.
 
 But **writes are different**: there is **no `eth_sendTransaction`**. Use the
-`qc_*` methods (`qc_sendCoin`, `qc_sendToken`, `qc_sendTransaction`) for anything
-that signs or sends. Also remember:
+`qc_*` methods (`qc_signMessage`, `qc_sendTransaction`) for anything that signs or
+sends — including native coin and ERC20 token transfers, which both go through
+`qc_sendTransaction`. Also remember:
 
 - Addresses are 32 bytes — libraries that validate 20-byte Ethereum addresses
   will reject QuantumCoin addresses.

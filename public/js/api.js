@@ -254,12 +254,16 @@ async function listAccountTokens(scanApiDomain, address, pageIndex) {
         }
         let tokenBalance = await hexWeiToEthFormatted(token.tokenBalance);
 
+        // item 19: cap name/symbol length at parse time so a multi-MB metadata
+        // value from a hostile token contract cannot bloat memory / the DOM. The
+        // display layer truncates further (25/6); this is a hard upper bound.
+        const TOKEN_TEXT_MAX = 128;
         if (token.name !== null && (typeof token.name === 'string' || token.name instanceof String)) {
-            tokenName = token.name;
+            tokenName = String(token.name).slice(0, TOKEN_TEXT_MAX);
         }
 
         if (token.symbol !== null && (typeof token.symbol === 'string' || token.symbol instanceof String)) {
-            tokenSymbol = token.symbol;
+            tokenSymbol = String(token.symbol).slice(0, TOKEN_TEXT_MAX);
         }
 
         let tokenDetails = new AccountTokenDetails(tokenBalance, token.contractAddress, tokenName, tokenSymbol);

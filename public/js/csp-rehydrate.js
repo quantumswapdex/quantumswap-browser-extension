@@ -28,6 +28,54 @@
 
   var CHECKED_ASSIGN = /^document\.getElementById\((['"])(.+?)\1\)\.checked\s*=\s*true$/;
   var CALL_EXPR = /^([A-Za-z_$][\w$]*)\s*\(([\s\S]*)\)$/;
+  var IDENT = /^[A-Za-z_$][\w$]*$/;
+
+  // item 13: instead of resolving ANY global by name (which turned this tiny
+  // interpreter into an "any window function is callable" amplifier), we only
+  // resolve names that appear in the extension's OWN trusted markup. The allowlist
+  // is built from the static document (+ its row templates) during the initial
+  // boot scan, then frozen — nodes injected later (e.g. token rows added via
+  // innerHTML, or anything a compromised path could insert) can invoke ONLY the
+  // handler functions / arg identifiers the real UI already uses, never new ones.
+  var HANDLER_NAME_ALLOWLIST = new Set();
+  var ARG_IDENT_ALLOWLIST = new Set();
+  var allowlistFrozen = false;
+
+  // Record the identifier used as a bare (unquoted, non-literal) handler argument,
+  // mirroring evalArg's fallback branch (e.g. foo(currentWalletAddress)).
+  function collectArgIdent(token) {
+    token = token.trim();
+    if (token === "" || token === "this" || token === "event"
+      || token === "true" || token === "false" || token === "null" || token === "undefined") return;
+    var q = token.charAt(0);
+    if ((q === "'" || q === '"') && token.charAt(token.length - 1) === q) return;
+    if (/^-?\d+(\.\d+)?$/.test(token)) return;
+    if (IDENT.test(token)) ARG_IDENT_ALLOWLIST.add(token);
+  }
+
+  function collectFromExpr(expr) {
+    expr = expr.trim();
+    var m = expr.match(CALL_EXPR);
+    if (!m) { collectArgIdent(expr); return; }
+    HANDLER_NAME_ALLOWLIST.add(m[1]);
+    var argsRaw = m[2].trim();
+    if (argsRaw !== "") splitTop(argsRaw, ",").forEach(collectArgIdent);
+  }
+
+  // Harvest the callable names + arg identifiers from one handler string so they
+  // can be added to the allowlist. Only called for trusted (static) markup.
+  function collectFromCode(code) {
+    var stmts = splitTop(code, ";");
+    for (var i = 0; i < stmts.length; i++) {
+      var stmt = stmts[i].trim();
+      if (stmt === "" || stmt === "return") continue;
+      if (stmt.indexOf("return ") === 0) stmt = stmt.slice(6).trim();
+      // The if(event.key...) activation and checked-assign forms invoke no globals.
+      if (stmt.indexOf("if") === 0 && stmt.indexOf("event.key") !== -1) continue;
+      if (CHECKED_ASSIGN.test(stmt)) continue;
+      collectFromExpr(stmt);
+    }
+  }
 
   // Split a code string on top-level separators, ignoring separators that are
   // inside quotes, parentheses, or braces.
@@ -67,7 +115,10 @@
       return token.slice(1, -1);
     }
     if (/^-?\d+(\.\d+)?$/.test(token)) return Number(token);
-    return window[token];
+    // item 13: only resolve a global variable named by trusted markup.
+    if (ARG_IDENT_ALLOWLIST.has(token)) return window[token];
+    console.warn("[csp-rehydrate] arg identifier not allowed:", token);
+    return undefined;
   }
 
   // Evaluate a single call expression like NAME(ARGS). Returns the call result,
@@ -76,6 +127,11 @@
     expr = expr.trim();
     var m = expr.match(CALL_EXPR);
     if (!m) return evalArg(expr, el, event);
+    // item 13: only call handler functions named by trusted markup.
+    if (!HANDLER_NAME_ALLOWLIST.has(m[1])) {
+      console.warn("[csp-rehydrate] handler function not allowed:", m[1]);
+      return undefined;
+    }
     var fn = window[m[1]];
     if (typeof fn !== "function") {
       console.warn("[csp-rehydrate] handler function not found:", m[1]);
@@ -137,6 +193,10 @@
       var attr = EVENT_ATTRS[i];
       if (!el.hasAttribute(attr)) continue;
       var code = el.getAttribute(attr);
+      // item 13: harvest callable names from trusted (static) markup only. Once
+      // frozen (after the initial boot scan), later-injected nodes contribute
+      // nothing to the allowlist and can only call already-known handlers.
+      if (!allowlistFrozen) collectFromCode(code);
       el.removeAttribute(attr);
       var type = attr.slice(2);
       (function (codeStr, evtType, target) {
@@ -159,7 +219,10 @@
   }
 
   function boot() {
+    // Initial scan of the trusted static markup builds the allowlist; freeze it
+    // before observing so dynamically-added nodes cannot extend it.
     scan(document.body);
+    allowlistFrozen = true;
     var observer = new MutationObserver(function (mutations) {
       for (var i = 0; i < mutations.length; i++) {
         var added = mutations[i].addedNodes;

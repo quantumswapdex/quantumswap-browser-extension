@@ -288,33 +288,92 @@
         }
     });
 
+    // Left-pad a hex string (no 0x) to a full 32-byte ABI word.
+    function padLeft32(hex) {
+        var clean = hex.replace(/^0x/i, "");
+        return "0".repeat(Math.max(0, 64 - clean.length)) + clean;
+    }
+
+    // ERC20 transfer(address,uint256) calldata: selector 0xa9059cbb + recipient
+    // word + amount word. The wallet re-encodes this from the supplied `abi` and
+    // rejects (WYSIWYS) if it does not byte-match, so token transfers get the same
+    // decode-and-verify review as any other qc_sendTransaction.
+    var ERC20_TRANSFER_ABI = [
+        {
+            type: "function",
+            name: "transfer",
+            stateMutability: "nonpayable",
+            inputs: [
+                { name: "to", type: "address" },
+                { name: "amount", type: "uint256" }
+            ],
+            outputs: [{ name: "", type: "bool" }]
+        }
+    ];
+    function encodeErc20Transfer(toAddr, amountBig) {
+        return "0xa9059cbb" + padLeft32(toAddr) + abiUint256(amountBig);
+    }
+
+    // Token transfer is a standard qc_sendTransaction (eth_sendTransaction) to the
+    // token contract with ERC20 transfer(...) calldata. The demo token uses 18
+    // decimals, matching the deploy step above.
     btnSendToken.addEventListener("click", async function () {
         var provider = requireProvider();
         if (!provider) return;
+        var contract = document.getElementById("contractInput").value.trim();
+        var to = document.getElementById("toInput").value.trim();
+        var amountTokens = document.getElementById("amountInput").value.trim();
+
+        var amountWei;
+        try {
+            amountWei = tokensToWei(amountTokens);
+        } catch (e) {
+            var m = String(e && e.message || e);
+            log("error: sendToken", m);
+            window.alert(m);
+            return;
+        }
+
         var params = {
-            contractAddress: document.getElementById("contractInput").value.trim(),
-            to: document.getElementById("toInput").value.trim(),
-            amount: document.getElementById("amountInput").value.trim()
+            to: contract,
+            data: encodeErc20Transfer(to, amountWei),
+            value: "0x0",
+            abi: ERC20_TRANSFER_ABI
         };
         try {
-            log("request: qc_sendToken", params);
-            var res = await provider.request({ method: "qc_sendToken", params: params });
+            log("request: qc_sendTransaction (ERC20 transfer)", { contract: contract, to: to, amount: amountTokens });
+            var res = await provider.request({ method: "qc_sendTransaction", params: params });
             log("result: sendToken", res);
         } catch (e) {
             log("error: sendToken", String(e && e.message || e));
         }
     });
 
+    // Native coin transfer is a standard qc_sendTransaction with `to` + `value`
+    // (wei), mirroring eth_sendTransaction. Amount is entered in whole coins.
     btnSendCoin.addEventListener("click", async function () {
         var provider = requireProvider();
         if (!provider) return;
+        var to = document.getElementById("toInput").value.trim();
+        var amountCoins = document.getElementById("amountInput").value.trim();
+
+        var valueWei;
+        try {
+            valueWei = tokensToWei(amountCoins);
+        } catch (e) {
+            var m = String(e && e.message || e);
+            log("error: sendCoin", m);
+            window.alert(m);
+            return;
+        }
+
         var params = {
-            to: document.getElementById("toInput").value.trim(),
-            amount: document.getElementById("amountInput").value.trim()
+            to: to,
+            value: "0x" + valueWei.toString(16)
         };
         try {
-            log("request: qc_sendCoin", params);
-            var res = await provider.request({ method: "qc_sendCoin", params: params });
+            log("request: qc_sendTransaction (native transfer)", { to: to, amount: amountCoins });
+            var res = await provider.request({ method: "qc_sendTransaction", params: params });
             log("result: sendCoin", res);
         } catch (e) {
             log("error: sendCoin", String(e && e.message || e));

@@ -1,5 +1,9 @@
+"use strict";
+
 const CRYPTO_AES_KEY_SIZE = 32;
 const CRYPTO_AES_IV_SIZE = 16;
+const CRYPTO_AES_GCM_IV_SIZE = 12;
+const CRYPTO_ALG_GCM = "AES-GCM";
 const SCRYPT_SALT_SIZE = 32;
 const CRYPTO_SEED_BYTES = 96;
 
@@ -14,9 +18,12 @@ async function isValidQcAddress(address) {
 
 class EncryptedPayload {
 
-    constructor(cipherText, iv) {
+    // The vault is authenticated AES-GCM only; `alg`/`v` are always set.
+    constructor(cipherText, iv, alg) {
         this.cipherText = cipherText;
         this.iv = iv;
+        this.alg = alg;
+        this.v = 2;
     }
 
 }
@@ -63,23 +70,20 @@ function cryptoNewAesKey() {
     return cryptoRandom(CRYPTO_AES_KEY_SIZE);
 }
 
-async function cryptoEncrypt(base64data) {
-    encrypted = await CryptoApi.send('CryptoApiEncrypt', base64data);
-    return encrypted;
-}
-
 async function cryptoApiEncrypt(aesKeyArray, plainText) {
-    const iv = await cryptoRandom(CRYPTO_AES_IV_SIZE);
+    // New writes use authenticated AES-GCM with a fresh 12-byte IV.
+    const iv = await cryptoRandom(CRYPTO_AES_GCM_IV_SIZE);
     const ivBase64 = bytesToBase64(iv);
 
     const encryptRequest = {
         key: bytesToBase64(aesKeyArray),
         iv: ivBase64,
-        plainText: plainText
+        plainText: plainText,
+        alg: CRYPTO_ALG_GCM
     }
     const cipherText = await CryptoApi.send('CryptoApiEncrypt', encryptRequest);
 
-    const encryptedPayload = new EncryptedPayload(cipherText, ivBase64);
+    const encryptedPayload = new EncryptedPayload(cipherText, ivBase64, CRYPTO_ALG_GCM);
 
     return encryptedPayload;
 }
@@ -90,10 +94,11 @@ async function cryptoApiDecrypt(aesKeyArray, encryptedPayload) {
         const decryptRequest = {
             key: bytesToBase64(aesKeyArray),
             iv: encryptedPayload.iv,
-            cipherText: encryptedPayload.cipherText
+            cipherText: encryptedPayload.cipherText,
+            alg: CRYPTO_ALG_GCM
         }
 
-        plainText = await CryptoApi.send('CryptoApiDecrypt', decryptRequest);
+        const plainText = await CryptoApi.send('CryptoApiDecrypt', decryptRequest);
         return plainText;
     } catch (error) {
         return null;

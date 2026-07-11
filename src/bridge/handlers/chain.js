@@ -22,7 +22,16 @@ import {
 
 function signingOverrides(wallet, data, base) {
   const fullSign = data && data.advancedSigningEnabled === true;
-  return { ...base, signingContext: wallet.getSigningContext(fullSign) };
+  const out = { ...base, signingContext: wallet.getSigningContext(fullSign) };
+  // item 5: pin the exact gas price the user approved (the fee shown in the UI is
+  // derived from it) so the SDK/node cannot re-fetch a different price between the
+  // review screen and broadcast. Single choke point covering every submit handler
+  // that routes through signingOverrides.
+  if (data && data.gasPriceWei != null && String(data.gasPriceWei) !== "") {
+    const gp = toBigInt(data.gasPriceWei);
+    if (gp != null && gp > 0n) out.gasPrice = gp;
+  }
+  return out;
 }
 
 function sanitizeSwapError(err) {
@@ -98,6 +107,10 @@ function hexDataEquals(a, b) {
 
 // Accept the Ethereum wire form (hex-wei, e.g. "0x16345785d8a0000") and, for
 // leniency, a plain decimal-wei string. Returns a BigInt (0n when absent).
+// item 22: fail CLOSED — throw on an unparseable value instead of silently
+// coercing it to 0n (which would drop/alter the amount being signed). Every
+// caller runs inside a try/catch that maps the throw to a { success:false }
+// / WYSIWYS verify error, so a malformed value is rejected rather than signed.
 function parseHexOrDecimalWei(value) {
   if (value == null || value === "") return 0n;
   if (typeof value === "bigint") return value;
@@ -106,7 +119,7 @@ function parseHexOrDecimalWei(value) {
   try {
     return BigInt(s);
   } catch (e) {
-    return 0n;
+    throw new Error("Invalid transaction value: expected a hex-wei or decimal-wei amount.");
   }
 }
 
@@ -337,7 +350,10 @@ async function buildEstimateGasTx(data, provider) {
       getAddress(toAddress),
       deadline,
     );
-    return { ...tx, from: getAddress(toAddress) };
+    // item 21: estimate as the wallet/owner (the actual sender), not the swap
+    // recipient. `toAddress` is only the funds recipient and may differ from the
+    // signer; using it as `from` estimates against the wrong account's state.
+    return { ...tx, from: getAddress(fromAddress || toAddress) };
   }
 
   // Staking contract methods
@@ -467,6 +483,8 @@ export default {
       const toDecimals = typeof data.toDecimals === "number" ? data.toDecimals : 18;
       const toAddress = data.recipientAddress || data.toAddress;
       if (!toAddress) return { success: false, gasLimit: null, error: "Recipient address required" };
+      // item 21: the sender/owner for estimation is the wallet, not the recipient.
+      const ownerAddress = data.ownerAddress || data.fromAddress || toAddress;
       const deadline = await getSwapTxDeadline(provider, 1200);
       const lastChanged = data.lastChanged === "to" ? "to" : "from";
       const slippagePercent = Math.max(0, Math.min(100, Number(data.slippagePercent) || 1));
@@ -493,7 +511,7 @@ export default {
         getAddress(toAddress),
         deadline,
       );
-      const txWithFrom = { ...tx, from: getAddress(toAddress) };
+      const txWithFrom = { ...tx, from: getAddress(ownerAddress) };
       const gasLimit = await provider.estimateGas(txWithFrom);
       const gasLimitStr = typeof gasLimit === "bigint" ? gasLimit.toString() : String(gasLimit);
       return { success: true, gasLimit: gasLimitStr, error: null };
@@ -1071,10 +1089,15 @@ export default {
   // signed plus the dApp-supplied ABI (+ bytecode for a deployment): it decodes
   // the calldata, then re-encodes the decoded args and requires the result to
   // byte-match the original `data`. Any decode error or mismatch returns
-  // { success:false, error } so the UI can reject with an OK-only dialog. The
-  // dApp cannot influence what is displayed except through the exact bytes that
-  // get signed, so a tampered ABI/JSON can never show benign details for hostile
-  // calldata.
+  // { success:false, error } so the UI can reject with an OK-only dialog.
+  //
+  // IMPORTANT (SEC-12/13/17): the re-encode check only proves the shown ARG VALUES
+  // reproduce the exact signed calldata. It does NOT authenticate the human-readable
+  // method name, the parameter labels, or the 4-byte selector — those come from the
+  // dApp-supplied ABI and are unverified hints. A tampered ABI can still mislabel a
+  // function or its parameters (e.g. call the selector "safeTransfer" while it is
+  // something else), so the approval UI warns that these labels are site-provided and
+  // that only the raw calldata is authoritative.
   async DecodeTransaction(data) {
     try {
       const chainId = Number(data.chainId);

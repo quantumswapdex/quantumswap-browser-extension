@@ -4,14 +4,24 @@ document.addEventListener('DOMContentLoaded', function () {
     initApp();
 });
 
+// SEC-11: never render raw (possibly secret-derived) error text into the UI.
+// Log the detail to the console for debugging and show a generic lockup message.
+function bootGenericErrorMessage() {
+    try {
+        return getGenericError("");
+    } catch (e) {
+        return "An unexpected error occurred.";
+    }
+}
+
 window.onerror = (message, source, lineno, colno, error) => {
-    showErrorAndLockup(message);
+    console.error("window.onerror:", message, source, lineno, colno, error);
+    showErrorAndLockup(bootGenericErrorMessage());
 };
 
 window.addEventListener("unhandledrejection", event => {
-    var reason = event.reason;
-    var detail = (reason && reason.message) ? String(reason.message) : String(reason);
-    showErrorAndLockup(detail);
+    console.error("unhandledrejection:", event && event.reason);
+    showErrorAndLockup(bootGenericErrorMessage());
 });
 
 window.onload = function () {

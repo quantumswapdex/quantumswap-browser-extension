@@ -14,14 +14,37 @@ export default {
   },
 
   // Electron: shell.openExternal -> open the URL in a new browser tab.
+  // item 23: only open http/https. Reject javascript:/data:/chrome-extension:/
+  // file: and other schemes so a caller cannot trigger script execution or
+  // navigate to a privileged/local target.
   async OpenUrlInShell(data) {
-    await ext.tabs.create({ url: data });
+    let parsed;
+    try {
+      parsed = new URL(String(data));
+    } catch (e) {
+      throw new Error("OpenUrlInShell: invalid URL");
+    }
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      throw new Error("OpenUrlInShell: only http(s) URLs are allowed");
+    }
+    await ext.tabs.create({ url: parsed.href });
   },
 
   // Electron: fs.readFileSync(path.join(__dirname, data)) -> fetch a bundled
   // extension resource. Callers pass paths like "./json/en-us.json".
+  // item 23: only allow bundled relative paths. Reject absolute paths, parent
+  // traversal (`..`), and anything carrying a scheme (`://`) so this cannot be
+  // coerced into fetching a resource outside the extension bundle.
   async FileApiReadFile(data) {
-    const relative = String(data).replace(/^\.\//, "");
+    const raw = String(data);
+    const relative = raw.replace(/^\.\//, "");
+    if (relative === ""
+        || relative.includes("..")
+        || relative.includes("://")
+        || relative.charAt(0) === "/"
+        || relative.charAt(0) === "\\") {
+      throw new Error("FileApiReadFile: invalid path");
+    }
     const url = ext.runtime.getURL(relative);
     const response = await fetch(url);
     if (!response.ok) {

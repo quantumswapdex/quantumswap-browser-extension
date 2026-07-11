@@ -91,6 +91,7 @@ async function increaseDepositSubmit(quantumWallet) {
             methodArgs: [],
             value: validatorDepositCoins,
             gasLimit: parseInt(resolveGasForTx(INCREASE_DEPOSIT_GAS).gasLimit, 10),
+            gasPriceWei: resolveGasForTx(INCREASE_DEPOSIT_GAS).gasPriceWei,
             privateKey: await quantumWallet.getPrivateKey(),
             publicKey: await quantumWallet.getPublicKey(),
             advancedSigningEnabled: await advancedSigningGetDefaultValue()
@@ -116,7 +117,7 @@ async function increaseDepositSubmit(quantumWallet) {
         if (isNetworkError(error)) {
             showWarnAlert(langJson.errors.internetDisconnected);
         } else {
-            showWarnAlert(langJson.errors.invalidApiResponse + ' ' + error);
+            { console.error(error); showWarnAlert(langJson.errors.invalidApiResponse); }
         }
     }
 }
@@ -133,6 +134,7 @@ async function increaseDepositOfflineSign(quantumWallet) {
             methodArgs: [],
             value: validatorDepositCoins,
             gasLimit: parseInt(resolveGasForTx(INCREASE_DEPOSIT_GAS).gasLimit, 10),
+            gasPriceWei: resolveGasForTx(INCREASE_DEPOSIT_GAS).gasPriceWei,
             nonce: parseInt(currentNonce),
             privateKey: await quantumWallet.getPrivateKey(),
             publicKey: await quantumWallet.getPublicKey(),

@@ -68,7 +68,9 @@ async function walletGetMaxIndex() {
         throw new Error('MaxWalletIndex is not a number.');
     }
 
-    if (maxWalletIndex < 0 || maxWalletIndex > MAX_WALLETS) {
+    // -1 is the valid "no wallets" sentinel written when reconciliation/rollback
+    // (DUR-03) rolls the reserved index all the way back. Anything lower is corrupt.
+    if (maxWalletIndex < -1 || maxWalletIndex > MAX_WALLETS) {
         throw new Error('MaxWalletIndex out of range.');
     }
 
@@ -109,37 +111,60 @@ async function walletCreateNewWalletFromJson(walletJsonString, passphrase) {
 }
 
 async function walletSave(wallet, passphrase) {
+    // DUR-04: run the whole read-modify-write under the vault lock. The nested
+    // load uses the internal (non-locking) variant because QC_LOCK_VAULT is not
+    // reentrant; re-acquiring the same lock name would deadlock.
+    return await qcWithLock(QC_LOCK_VAULT, async function () {
+        return await walletSaveInternal(wallet, passphrase);
+    });
+}
+
+async function walletSaveInternal(wallet, passphrase) {
     if (WALLET_ADDRESS_TO_INDEX_MAP_LOADED == false) {
-        await walletLoadAll(passphrase);
+        await walletLoadAllInternal(passphrase);
     }
 
     if (WALLET_ADDRESS_TO_INDEX_MAP.has(wallet.address.toString().toLowerCase()) == true) {
         return false;
     }
 
-    let maxWalletIndex = await walletGetMaxIndex();
-    maxWalletIndex = maxWalletIndex + 1;
+    let previousMaxWalletIndex = await walletGetMaxIndex();
+    let newIndex = previousMaxWalletIndex + 1;
 
-    let key = WALLET_KEY_PREFIX + maxWalletIndex.toString();
+    let key = WALLET_KEY_PREFIX + newIndex.toString();
     let keyExists = await storageDoesItemExist(key);
     if (keyExists == true) {
         return false;
     }
 
-    let walletJson = JSON.stringify(wallet);
-    
-    let walletStoreResult = await storageSetSecureItem(passphrase, key, walletJson);
-    if (walletStoreResult != true) {
-        return false;
-    }
-
-    let indexStoreResult = await storageSetItem(MAX_WALLET_INDEX_KEY, maxWalletIndex.toString());
+    // DUR-03: reserve the index FIRST, then write the wallet. If the process is
+    // killed between the two writes, walletReconcileIndexInternal rolls the
+    // dangling top index back on the next load, so the slot is reusable and future
+    // adds are never permanently blocked (the alternative ordering orphaned the
+    // wallet and wedged all subsequent adds).
+    let indexStoreResult = await storageSetItem(MAX_WALLET_INDEX_KEY, newIndex.toString());
     if (indexStoreResult != true) {
         return false;
     }
 
-    WALLET_ADDRESS_TO_INDEX_MAP.set(wallet.address.toString().toLowerCase(), maxWalletIndex);
-    WALLET_INDEX_TO_ADDRESS_MAP.set(maxWalletIndex, wallet.address.toString().toLowerCase());
+    let walletJson = JSON.stringify(wallet);
+
+    let walletStoreResult = false;
+    try {
+        walletStoreResult = await storageSetSecureItem(passphrase, key, walletJson);
+    } catch (walletWriteError) {
+        // Best-effort rollback so we don't leave a reserved-but-empty top slot.
+        await storageSetItem(MAX_WALLET_INDEX_KEY, previousMaxWalletIndex.toString());
+        throw walletWriteError;
+    }
+
+    if (walletStoreResult != true) {
+        await storageSetItem(MAX_WALLET_INDEX_KEY, previousMaxWalletIndex.toString());
+        return false;
+    }
+
+    WALLET_ADDRESS_TO_INDEX_MAP.set(wallet.address.toString().toLowerCase(), newIndex);
+    WALLET_INDEX_TO_ADDRESS_MAP.set(newIndex, wallet.address.toString().toLowerCase());
 
     return true;
 }
@@ -182,7 +207,43 @@ async function walletGetByAddress(passphrase, address) {
     return wallet;
 }
 
+// DUR-03: roll back a reserved-but-uncommitted top index left by an interrupted
+// walletSave. Only the trailing slot can dangle (index-first guarantees every
+// WALLET_<k> for k < n was committed before n was reserved), so we walk down from
+// the stored max while the top WALLET_<n> is absent and persist the corrected max.
+// A missing middle slot is real corruption (DUR-06) and is intentionally left for
+// the load path to surface.
+async function walletReconcileIndexInternal() {
+    let maxWalletIndex = await walletGetMaxIndex();
+    let reconciledIndex = maxWalletIndex;
+    while (reconciledIndex >= 0) {
+        let key = WALLET_KEY_PREFIX + reconciledIndex.toString();
+        let exists = await storageDoesItemExist(key);
+        if (exists == true) {
+            break;
+        }
+        reconciledIndex = reconciledIndex - 1;
+    }
+
+    if (reconciledIndex != maxWalletIndex) {
+        let result = await storageSetItem(MAX_WALLET_INDEX_KEY, reconciledIndex.toString());
+        if (result != true) {
+            throw new Error('walletReconcileIndexInternal failed to persist reconciled index.');
+        }
+    }
+}
+
 async function walletLoadAll(passphrase) {
+    // DUR-04: serialize the full load (reconcile + read) against concurrent
+    // mutations on other surfaces.
+    return await qcWithLock(QC_LOCK_VAULT, async function () {
+        return await walletLoadAllInternal(passphrase);
+    });
+}
+
+async function walletLoadAllInternal(passphrase) {
+    await walletReconcileIndexInternal();
+
     let maxWalletIndex = await walletGetMaxIndex();
     let walletKeyArray = [];
     for (var i = 0; i <= maxWalletIndex; i++) {
@@ -206,6 +267,12 @@ async function walletLoadAll(passphrase) {
         let wallet = JSON.parse(walletJsonArray[i]);
         if (wallet.address == null) {
             throw new Error('walletLoadAll storageMultiGetSecureItems wallet address is null.');
+        }
+        // item 14: re-validate the address shape on load so a tampered/imported
+        // vault record cannot inject a non-hex address that later reaches the DOM
+        // (wallet-row onclick args) or explorer URLs.
+        if (typeof wallet.address !== 'string' || /^0x[0-9a-fA-F]{64}$/.test(wallet.address) === false) {
+            throw new Error('walletLoadAll wallet address has an invalid format.');
         }
         walletArray.push(wallet);
         WALLET_ADDRESS_TO_INDEX_MAP.set(wallet.address.toLowerCase(), i);

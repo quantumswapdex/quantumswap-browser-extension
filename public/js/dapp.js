@@ -1,10 +1,10 @@
 // dApp approval controller. Loaded only by public/approve.html, which the
 // background broker opens as `approve.html?requestId=...`. It bypasses the normal
 // wallet boot and drives the Send-styled approval card (#dappApprovalRoot) for
-// three request kinds:
+// these request kinds:
 //   - qc_requestAccounts : unlock + pick account + sign a login challenge
 //   - qc_signMessage     : unlock + EIP-191 sign an arbitrary message
-//   - qc_sendToken/Coin  : unlock + broadcast via the existing chain path
+//   - qc_sendTransaction : unlock + WYSIWYS-verified sign + broadcast
 //
 // Connect/sign results flow back through `qc-approval-result`; sends report the
 // broadcast txHash through `qc-approval-txBroadcast` and hand confirmation
@@ -68,19 +68,21 @@
     var pendingRequest = null;
     var settled = false;
     var lang = {};
+    // item 12: the exact {to,data,value} that passed the WYSIWYS decode in
+    // renderTransaction. doSendTransaction re-verifies against this before signing
+    // so any mutation between render and submit is caught and rejected.
+    var verifiedTx = null;
 
     // Gas config for send approvals (self-contained parity with app.js). `overridden`
     // becomes true once the user edits the values via the Gas dialog, after which the
     // live estimate no longer replaces them.
-    var COIN_SEND_GAS = 21000;
-    var TOKEN_SEND_GAS = 84000;
     var TX_SEND_GAS = 250000; // default for a generic dApp transaction (contract call/deploy)
     var SWAP_GAS_FEE_RATE = 1000 / 21000;
     var GAS_FEE_DECIMALS = 4;
     var GAS_FEE_UNIT_LABEL = "Q";
     var GAS_ESTIMATE_BUFFER_PERCENT = 10;
     var GAS_NO_BUFFER_PERCENT = 0;
-    var dappGasConfig = { gasLimit: null, gasFee: null, overridden: false };
+    var dappGasConfig = { gasLimit: null, gasFee: null, gasPriceWei: null, overridden: false };
     var dappGasToken = 0;
     var onDappGasConfigOk = null;
     var dappGasConfigFeeRate = null;
@@ -363,13 +365,17 @@
     // to the status line rather than a shared (uninitialized) lockup screen.
     function installErrorGuards() {
         window.__qcApprovalView = true;
-        window.onerror = function (message) {
-            setStatus(String(message));
+        // SEC-11: log detail to the console but show only a generic message so no
+        // secret-derived error text is rendered into the popup status line.
+        var genericErr = t("dapp-unexpected-error", "An unexpected error occurred.");
+        window.onerror = function (message, source, lineno, colno, error) {
+            console.error("dapp window.onerror:", message, source, lineno, colno, error);
+            setStatus(genericErr);
             return true;
         };
         window.addEventListener("unhandledrejection", function (event) {
-            var reason = event && event.reason;
-            setStatus(reason && reason.message ? reason.message : String(reason));
+            console.error("dapp unhandledrejection:", event && event.reason);
+            setStatus(genericErr);
             try { event.preventDefault(); } catch (e) { /* ignore */ }
         });
     }
@@ -433,23 +439,36 @@
         if (d) { d.style.display = "block"; if (d.showModal) { try { d.showModal(); } catch (e) { /* already open */ } } }
     }
 
+    // SEC-14: true if any of the supplied display values carries spoofing Unicode
+    // (bidi overrides, zero-width/format chars, control chars). Used to hard-reject
+    // dApp-displayed values so a request can never be approved while showing text
+    // that visually differs from the bytes being signed.
+    function anyUnsafeDisplayText(values) {
+        for (var i = 0; i < values.length; i++) {
+            if (containsUnsafeDisplayText(values[i])) return true;
+        }
+        return false;
+    }
+
     // ---- request validation ----------------------------------------------
     // Belt-and-suspenders: the background broker already early-rejects the same
     // cases before opening this popup. This is the authoritative (SDK-backed)
     // second check for anything that still reaches the approval card.
     function isEthStyleAddress(a) {
-        return typeof a === "string" && /^0x?[0-9a-fA-F]{40}$/.test(a.trim());
+        return typeof a === "string" && /^0x[0-9a-fA-F]{40}$/.test(a.trim());
     }
 
     async function isQcAddress(a) {
         if (typeof a !== "string") return false;
         var s = a.trim();
-        if (!/^0x?[0-9a-fA-F]{64}$/.test(s)) return false;
+        // Cheap shape prefilter; the SDK IsValidAddress check below is authoritative.
+        if (!/^0x[0-9a-fA-F]{64}$/.test(s)) return false;
         try {
             return (await isValidQcAddress(s)) === true;
         } catch (e) {
-            // If the bridge is unavailable, fall back to the length/hex check.
-            return true;
+            // Fail closed: if the SDK bridge is unavailable we cannot confirm the
+            // address is valid, so reject rather than accept an unverified address.
+            return false;
         }
     }
 
@@ -469,19 +488,6 @@
             var m = params.message;
             if (typeof m !== "string" || m.length === 0) {
                 return t("dapp-err-invalid-message", "Invalid message: expected a non-empty string.");
-            }
-            return null;
-        }
-        if (method === "qc_sendToken" || method === "qc_sendCoin") {
-            if (method === "qc_sendToken") {
-                var contractErr = await validateAddressParam(params.contractAddress);
-                if (contractErr) return contractErr;
-            }
-            var toErr = await validateAddressParam(params.to);
-            if (toErr) return toErr;
-            var amt = Number(params.amount);
-            if (!isFinite(amt) || amt <= 0) {
-                return t("dapp-err-invalid-amount", "Invalid amount.");
             }
             return null;
         }
@@ -529,7 +535,9 @@
 
     // ---- flow: connect ---------------------------------------------------
     function buildChallenge(origin, address) {
-        var nonce = Math.random().toString(36).slice(2) + Date.now().toString(36);
+        var nonceBytes = new Uint8Array(16);
+        globalThis.crypto.getRandomValues(nonceBytes);
+        var nonce = Array.from(nonceBytes, function (x) { return x.toString(16).padStart(2, "0"); }).join("");
         return "QuantumSwap Connect\n\n"
             + "Site: " + origin + "\n"
             + "Address: " + address + "\n"
@@ -665,6 +673,17 @@
     // Mirrors the sidebar Send screen: show an estimated fee + a gas icon that
     // opens an editable dialog. Uses the same bridge calls (estimateGas /
     // estimateGasFee) available on this page via js/bridge.js.
+    // item 5: derive a decimal-wei per-gas-unit price from a fee (coins) + gas
+    // limit for the cases where the node didn't return an exact price.
+    function computeGasPriceWei(gasFeeEth, gasLimit) {
+        var fee = parseFloat(gasFeeEth);
+        var gl = parseFloat(gasLimit);
+        if (isNaN(fee) || isNaN(gl) || gl <= 0) return null;
+        var wei = Math.round((fee * 1e18) / gl);
+        if (!isFinite(wei) || wei < 0) return null;
+        return String(wei);
+    }
+
     function formatGasFeeNumber(value) {
         var n = parseFloat(value);
         if (isNaN(n)) n = 0;
@@ -693,70 +712,12 @@
         else e.classList.remove("gas-pulse");
     }
 
-    // Estimate gas limit + fee for the pending send request. Falls back to the
-    // hardcoded default gas limit / rate when a network lookup fails.
-    async function estimateSendGas(method, params) {
-        setGasIconPulse(true);
-        setGasFeeLabel("");
-        var myToken = ++dappGasToken;
-        var isCoin = (method === "qc_sendCoin");
-        var defaultGasLimit = isCoin ? COIN_SEND_GAS : TOKEN_SEND_GAS;
-
-        await ensureNetwork();
-        if (!currentNet) { setGasIconPulse(false); return; }
-
-        var gasLimit = null;
-        try {
-            var payload = {
-                rpcEndpoint: currentNet.rpcEndpoint,
-                chainId: parseInt(currentNet.networkId, 10),
-                txKind: isCoin ? "sendCoin" : "sendToken",
-                fromAddress: params.from,
-                toAddress: params.to,
-                amount: String(params.amount),
-                bufferPercent: isCoin ? GAS_NO_BUFFER_PERCENT : GAS_ESTIMATE_BUFFER_PERCENT
-            };
-            if (!isCoin) {
-                payload.contractAddress = params.contractAddress;
-                payload.fromDecimals = (params.decimals != null) ? params.decimals : 18;
-            }
-            var est = await estimateGas(payload);
-            if (myToken !== dappGasToken) { setGasIconPulse(false); return; }
-            if (est && est.success && est.gasLimit) gasLimit = est.gasLimit;
-        } catch (e) { /* fall back below */ }
-
-        if (gasLimit == null) gasLimit = String(defaultGasLimit);
-
-        var gasFee = null;
-        try {
-            var fullSign = await getAdvancedSigningEnabled();
-            var feeRes = await estimateGasFee({
-                rpcEndpoint: currentNet.rpcEndpoint,
-                chainId: parseInt(currentNet.networkId, 10),
-                gasLimit: gasLimit,
-                keyType: (typeof WALLET_KEY_TYPE_3 !== "undefined") ? WALLET_KEY_TYPE_3 : 3,
-                fullSign: fullSign === true
-            });
-            if (myToken !== dappGasToken) { setGasIconPulse(false); return; }
-            if (feeRes && feeRes.success && feeRes.gasFeeEth != null) gasFee = feeRes.gasFeeEth;
-        } catch (e) { /* fall back below */ }
-
-        if (gasFee == null) gasFee = (Number(gasLimit) * SWAP_GAS_FEE_RATE);
-
-        if (myToken === dappGasToken && !dappGasConfig.overridden) {
-            dappGasConfig.gasLimit = String(gasLimit);
-            dappGasConfig.gasFee = String(gasFee);
-            dappGasConfig.overridden = false;
-            setGasFeeLabel(dappGasConfig.gasFee);
-        }
-        setGasIconPulse(false);
-    }
-
     // Shared fee lookup: given a resolved gas limit, estimate the fee and (unless
     // the user has overridden the gas) publish it to the gas config + header label.
     async function finalizeGasEstimate(gasLimit, myToken) {
         if (gasLimit == null) { setGasIconPulse(false); return; }
         var gasFee = null;
+        var gasPriceWei = null;
         try {
             var fullSign = await getAdvancedSigningEnabled();
             var feeRes = await estimateGasFee({
@@ -767,7 +728,10 @@
                 fullSign: fullSign === true
             });
             if (myToken !== dappGasToken) { setGasIconPulse(false); return; }
-            if (feeRes && feeRes.success && feeRes.gasFeeEth != null) gasFee = feeRes.gasFeeEth;
+            if (feeRes && feeRes.success && feeRes.gasFeeEth != null) {
+                gasFee = feeRes.gasFeeEth;
+                if (feeRes.gasPriceWei != null) gasPriceWei = String(feeRes.gasPriceWei);
+            }
         } catch (e) { /* fall back below */ }
 
         if (gasFee == null) gasFee = (Number(gasLimit) * SWAP_GAS_FEE_RATE);
@@ -775,6 +739,8 @@
         if (myToken === dappGasToken && !dappGasConfig.overridden) {
             dappGasConfig.gasLimit = String(gasLimit);
             dappGasConfig.gasFee = String(gasFee);
+            // item 5: prefer the node's exact price; else derive from the shown fee.
+            dappGasConfig.gasPriceWei = (gasPriceWei != null) ? gasPriceWei : computeGasPriceWei(gasFee, gasLimit);
             dappGasConfig.overridden = false;
             setGasFeeLabel(dappGasConfig.gasFee);
         }
@@ -821,6 +787,12 @@
         return defaultGasLimit;
     }
 
+    // item 5: the pinned per-gas-unit price to submit (null lets the signer decide).
+    function resolveSendGasPrice() {
+        return (dappGasConfig.gasPriceWei != null && dappGasConfig.gasPriceWei !== "")
+            ? dappGasConfig.gasPriceWei : null;
+    }
+
     function showGasConfigDialog() {
         var limitEl = el("txtGasLimit");
         var feeEl = el("txtGasFee");
@@ -846,13 +818,11 @@
         var icon = el("dappGasIcon");
         if (icon) icon.addEventListener("click", function () {
             if (dappGasConfig.gasLimit == null) {
-                // No estimate yet: seed the dialog with the tx-kind default.
-                var m = pendingRequest && pendingRequest.method;
-                var def = TOKEN_SEND_GAS;
-                if (m === "qc_sendCoin") def = COIN_SEND_GAS;
-                else if (m === "qc_sendTransaction") def = TX_SEND_GAS;
+                // No estimate yet: seed the dialog with the transaction default.
+                var def = TX_SEND_GAS;
                 dappGasConfig.gasLimit = String(def);
                 dappGasConfig.gasFee = String(def * SWAP_GAS_FEE_RATE);
+                dappGasConfig.gasPriceWei = computeGasPriceWei(def * SWAP_GAS_FEE_RATE, def);
             }
             showGasConfigDialog();
         });
@@ -884,6 +854,7 @@
             dappGasToken++;
             dappGasConfig.gasLimit = String(gasLimit);
             dappGasConfig.gasFee = gasFee;
+            dappGasConfig.gasPriceWei = computeGasPriceWei(gasFee, gasLimit);
             dappGasConfig.overridden = true;
             setGasFeeLabel(dappGasConfig.gasFee);
             closeGasConfigDialog();
@@ -893,77 +864,63 @@
         if (cancelBtn) cancelBtn.addEventListener("click", closeGasConfigDialog);
     }
 
-    // ---- flow: send token / coin -----------------------------------------
-    async function doSend(method, params, password) {
-        var from = params.from;
-        var wallet = await walletGetByAddress(password, from);
-        if (!wallet) {
-            throw new Error(t("dappUnlockFailed", "Could not unlock the sending account (wrong password?)."));
-        }
-
-        await ensureNetwork();
-        var net = networkInfo();
-        if (!net) throw new Error(t("dappNoNetwork", "No blockchain network is configured."));
-
-        var priv = await wallet.getPrivateKey();
-        var pub = await wallet.getPublicKey();
-        var isCoin = (method === "qc_sendCoin");
-        var fullSign = await getAdvancedSigningEnabled();
-        var result;
-
-        updateWaitingBox(t("pleaseWaitSubmit", "Please wait while your request is being submitted."));
-
-        if (isCoin) {
-            result = await submitSendCoins({
-                rpcEndpoint: currentNet.rpcEndpoint,
-                chainId: parseInt(currentNet.networkId, 10),
-                toAddress: params.to,
-                amount: String(params.amount),
-                privateKey: priv,
-                publicKey: pub,
-                gasLimit: resolveSendGasLimit(COIN_SEND_GAS),
-                advancedSigningEnabled: fullSign
-            });
-        } else {
-            result = await submitSendTokens({
-                rpcEndpoint: currentNet.rpcEndpoint,
-                chainId: parseInt(currentNet.networkId, 10),
-                toAddress: params.to,
-                amount: String(params.amount),
-                contractAddress: params.contractAddress,
-                fromDecimals: (params.decimals != null) ? params.decimals : 18,
-                privateKey: priv,
-                publicKey: pub,
-                gasLimit: resolveSendGasLimit(TOKEN_SEND_GAS),
-                advancedSigningEnabled: fullSign
-            });
-        }
-
-        if (!result || !result.success || !result.txHash) {
-            throw new Error((result && result.error) ? String(result.error) : "Transaction submission failed.");
-        }
-
-        // Hand off to background for confirmation polling + transactionResult (so the
-        // dApp still gets the result even if this popup is closed), then show the
-        // post-send status dialog and poll here to drive its waiting -> completion UI.
-        await replyBroadcast(result.txHash, wallet.address);
-        hideWaitingBox();
-        var approveBtn = el("dappApproveBtn");
-        if (approveBtn) approveBtn.disabled = true;
-        showSendCompletedDialog(result.txHash, wallet.address);
+    // ---- flow: generic transaction (verified to/data/value) --------------
+    // item 12: normalize helpers for the pre-signing byte-compare.
+    function normTxTo(v) { return (v == null ? "" : String(v)).trim().toLowerCase(); }
+    function normTxData(v) {
+        var s = (v == null ? "" : String(v)).trim();
+        if (s === "" || s === "0x" || s === "0X") return "0x";
+        if (s.slice(0, 2).toLowerCase() === "0x") s = s.slice(2);
+        return "0x" + s.toLowerCase();
+    }
+    function normTxValue(v) {
+        if (v == null || String(v).trim() === "") return "0";
+        try { return BigInt(String(v).trim()).toString(); } catch (e) { return "\u0000invalid"; }
     }
 
-    // ---- flow: generic transaction (verified to/data/value) --------------
     async function doSendTransaction(params, password) {
         var from = params.from;
-        var wallet = await walletGetByAddress(password, from);
-        if (!wallet) {
-            throw new Error(t("dappUnlockFailed", "Could not unlock the sending account (wrong password?)."));
-        }
 
         await ensureNetwork();
         var net = networkInfo();
         if (!net) throw new Error(t("dappNoNetwork", "No blockchain network is configured."));
+
+        // item 12: re-verify WYSIWYS BEFORE unlocking any keys. The params must be
+        // byte-identical to what passed verification at render time, and must still
+        // decode successfully; otherwise reject (reject-only) so a tampered/mutated
+        // request can never be signed.
+        var verifyFailed = false;
+        if (!verifiedTx
+            || normTxTo(params.to) !== normTxTo(verifiedTx.to)
+            || normTxData(params.data) !== normTxData(verifiedTx.data)
+            || normTxValue(params.value) !== normTxValue(verifiedTx.value)) {
+            verifyFailed = true;
+        }
+        if (!verifyFailed) {
+            var recheck;
+            try {
+                recheck = await decodeTransaction({
+                    rpcEndpoint: currentNet ? currentNet.rpcEndpoint : null,
+                    chainId: net ? net.chainId : (params.chainId || 0),
+                    to: params.to,
+                    data: params.data,
+                    value: params.value,
+                    abi: params.abi,
+                    bytecode: params.bytecode
+                });
+            } catch (e) { recheck = null; }
+            if (!recheck || !recheck.success) verifyFailed = true;
+        }
+        if (verifyFailed) {
+            hideWaitingBox();
+            showErrorOnlyReject(t("dapp-tx-verify-failed", "The transaction could not be verified and was rejected to protect you from signing tampered or unverifiable data."));
+            return;
+        }
+
+        var wallet = await walletGetByAddress(password, from);
+        if (!wallet) {
+            throw new Error(t("dappUnlockFailed", "Could not unlock the sending account (wrong password?)."));
+        }
 
         var priv = await wallet.getPrivateKey();
         var pub = await wallet.getPublicKey();
@@ -980,6 +937,7 @@
             privateKey: priv,
             publicKey: pub,
             gasLimit: resolveSendGasLimit(TX_SEND_GAS),
+            gasPriceWei: resolveSendGasPrice(),
             advancedSigningEnabled: fullSign
         });
 
@@ -1003,10 +961,6 @@
             case "qc_signMessage":
                 await doSign(pendingRequest.params || {}, password);
                 break;
-            case "qc_sendToken":
-            case "qc_sendCoin":
-                await doSend(pendingRequest.method, pendingRequest.params || {}, password);
-                break;
             case "qc_sendTransaction":
                 await doSendTransaction(pendingRequest.params || {}, password);
                 break;
@@ -1025,6 +979,8 @@
             var lockPwd = el("dappPassword");
             var lockPassword = lockPwd ? lockPwd.value : "";
             if (!lockPassword) { setStatus(t("dapp-password-required", "Password is required.")); return; }
+            // SEC-07: clear the cleartext password from the DOM once captured.
+            if (lockPwd) lockPwd.value = "";
             setStatus("");
             if (approveBtn) approveBtn.disabled = true;
             showLoadingAndExecuteAsync(t("dapp-connecting", "Please wait while connecting..."), function () {
@@ -1048,6 +1004,8 @@
         var pwd = el("dappPassword");
         var password = pwd ? pwd.value : "";
         if (!password) { setStatus(t("dapp-password-required", "Password is required.")); return; }
+        // SEC-07: clear the cleartext password from the DOM once captured.
+        if (pwd) pwd.value = "";
         setStatus("");
 
         if (approveBtn) approveBtn.disabled = true;
@@ -1064,7 +1022,7 @@
     // before each flow updates it with a step-specific message.
     function initialWaitMessage(method) {
         if (method === "qc_signMessage") return t("dapp-signing", "Please wait while the request is being signed.");
-        if (method === "qc_sendToken" || method === "qc_sendCoin" || method === "qc_sendTransaction") return t("pleaseWaitSubmit", "Please wait while your request is being submitted.");
+        if (method === "qc_sendTransaction") return t("pleaseWaitSubmit", "Please wait while your request is being submitted.");
         return t("dapp-connecting", "Please wait while connecting...");
     }
 
@@ -1081,6 +1039,14 @@
     async function renderConnect(origin) {
         el("dappTitle").textContent = t("dapp-connect-title", "Connect Wallet");
         setStatus("");
+
+        // SEC-14: refuse to render a connect prompt whose origin carries spoofing
+        // Unicode (bidi/zero-width/control chars) so the displayed site can never
+        // visually differ from the origin being granted access.
+        if (containsUnsafeDisplayText(origin)) {
+            showErrorOnlyReject(t("dapp-unsafe-chars", "This request contains hidden or direction-changing characters that can disguise what you are approving. It was rejected for your safety."));
+            return;
+        }
 
         // No wallet exists yet: there is nothing to connect. Hide the approval
         // card entirely and present an OK-only error pane; OK (or closing the
@@ -1116,7 +1082,15 @@
         // If the docked wallet is unlocked, its current address is shared and we
         // can show it as the default (Sign & Connect, single click). Otherwise the
         // first click must Unlock (which then reveals the account dropdown).
+        // item 24: only trust the shared session address for the single-click
+        // "ready" path if it is a valid QuantumCoin address. A spoofed/garbage
+        // value falls through to the locked/unlock path (which loads wallets under
+        // the password). doConnect already rejects any address not present in the
+        // password-loaded wallets, so this only closes the display-spoof.
         var sessionAddress = await readSessionAddress();
+        if (sessionAddress && !(await isQcAddress(sessionAddress))) {
+            sessionAddress = null;
+        }
         if (sessionAddress) {
             connectState = "ready";
             connectAccounts = null;
@@ -1135,40 +1109,18 @@
 
     function renderSign(origin, params) {
         el("dappTitle").textContent = t("dapp-sign-title", "Sign Message");
+        // SEC-14: reject-only when the message carries spoofing Unicode so the
+        // rendered text can never differ from the bytes being signed.
+        if (containsUnsafeDisplayText(params.message)) {
+            showErrorOnlyReject(t("dapp-unsafe-chars", "This request contains hidden or direction-changing characters that can disguise what you are approving. It was rejected for your safety."));
+            return;
+        }
         renderAccountRow(params.address);
         show("dappSignScreen", true);
         el("dappSignMessage").textContent = String(params.message == null ? "" : params.message);
         el("dappApproveBtn").textContent = t("dapp-sign", "Sign");
         showIAgreeRow(true);
         setStatus("");
-    }
-
-    function renderSend(origin, method, params) {
-        var isCoin = (method === "qc_sendCoin");
-        el("dappTitle").textContent = isCoin ? t("dapp-sendcoin-title", "Send Coins") : t("dapp-send-title", "Send Tokens");
-        renderAccountRow(params.from);
-        show("dappSendReviewScreen", true);
-        el("dappSendTo").textContent = params.to || "";
-        el("dappSendAmount").textContent = String(params.amount == null ? "" : params.amount);
-        if (isCoin) {
-            show("dappSendContractRow", false);
-        } else {
-            show("dappSendContractRow", true);
-            el("dappSendContract").textContent = params.contractAddress || "";
-        }
-        el("dappSendJson").textContent = JSON.stringify(
-            { method: method, to: params.to, contractAddress: params.contractAddress, amount: params.amount, from: params.from },
-            null, 2
-        );
-        el("dappApproveBtn").textContent = t("dapp-send", "Sign & Send");
-        showIAgreeRow(true);
-        setStatus("");
-
-        // Show the gas icon/fee (parity with the Send screen) and kick off the
-        // live estimate. Errors are non-fatal; the default gas is used on failure.
-        dappGasConfig = { gasLimit: null, gasFee: null, overridden: false };
-        show("dappGasHeaderRight", true);
-        estimateSendGas(method, params).catch(function () { setGasIconPulse(false); });
     }
 
     // ---- rendering: generic transaction (WYSIWYS) ------------------------
@@ -1207,6 +1159,23 @@
 
         await ensureNetwork();
         var net = networkInfo();
+
+        // item 4: if the site connected on a different network than the wallet's
+        // current active network, refuse to sign (the broker forwards the connected
+        // site's chainId as params.chainId). Prevents signing a tx meant for one
+        // chain against a different active chain after the user switched networks.
+        if (params.chainId != null && net && params.chainId !== net.chainId) {
+            showErrorOnlyReject(t("dapp-chain-mismatch", "Your wallet's active network differs from the network this site is connected to. Switch back to the connected network before approving."));
+            return;
+        }
+
+        // SEC-14: reject-only when any dApp-displayed value carries spoofing Unicode
+        // (checked on the raw request before it is decoded/shown).
+        if (anyUnsafeDisplayText([params.to, params.data, params.value])) {
+            showErrorOnlyReject(t("dapp-unsafe-chars", "This request contains hidden or direction-changing characters that can disguise what you are approving. It was rejected for your safety."));
+            return;
+        }
+
         var decoded;
         try {
             decoded = await decodeTransaction({
@@ -1227,8 +1196,33 @@
             return;
         }
 
+        // SEC-14: reject-only when any decoded value that will be displayed carries
+        // spoofing Unicode (method/signature label, decoded arg values, the shown
+        // "To" address, and the value amount).
+        var decodedDisplayValues = [decoded.to, decoded.method, decoded.signature, decoded.valueDecimal];
+        if (decoded.args && decoded.args.length) {
+            for (var ai = 0; ai < decoded.args.length; ai++) {
+                var av = decoded.args[ai];
+                if (av) decodedDisplayValues.push(av.value == null ? "" : String(av.value));
+            }
+        }
+        if (anyUnsafeDisplayText(decodedDisplayValues)) {
+            showErrorOnlyReject(t("dapp-unsafe-chars", "This request contains hidden or direction-changing characters that can disguise what you are approving. It was rejected for your safety."));
+            return;
+        }
+
+        // item 12: stash the exact bytes that passed verification so
+        // doSendTransaction can confirm the request was not mutated before signing.
+        verifiedTx = {
+            to: params.to == null ? "" : String(params.to),
+            data: params.data == null ? "" : String(params.data),
+            value: params.value == null ? "" : String(params.value)
+        };
+
         renderAccountRow(params.from);
         show("dappTxScreen", true);
+        // item 11: contract-creation deploys have opaque, unverified bytecode.
+        show("dapp-deploy-warning", decoded.kind === "deploy");
         if (decoded.kind === "deploy") {
             el("dappTxTarget").textContent = t("dapp-contract-creation", "Contract creation");
         } else {
@@ -1250,7 +1244,7 @@
         setStatus("");
 
         // Gas controls (parity with the Send screen).
-        dappGasConfig = { gasLimit: null, gasFee: null, overridden: false };
+        dappGasConfig = { gasLimit: null, gasFee: null, gasPriceWei: null, overridden: false };
         show("dappGasHeaderRight", true);
         estimateGenericGas(params).catch(function () { setGasIconPulse(false); });
     }
@@ -1305,10 +1299,6 @@
                     break;
                 case "qc_signMessage":
                     renderSign(origin, params);
-                    break;
-                case "qc_sendToken":
-                case "qc_sendCoin":
-                    renderSend(origin, pendingRequest.method, params);
                     break;
                 case "qc_sendTransaction":
                     await renderTransaction(origin, params);

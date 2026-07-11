@@ -1,7 +1,6 @@
 "use strict";
 
-const DERIVED_KEY_SALT = "derivedkeysalt"; //key for key-value of storage
-const ENCRYPTED_MAIN_KEY = "encryptedmainkey"; //key for key-value of storage
+const ENCRYPTED_MAIN_KEY = "encryptedmainkey"; //key for key-value of storage. Holds one atomic { salt, payload } record (DUR-02).
 const IS_EULA_ACCEPTED = "eulaaccepted"; //key for key-value of storage
 
 async function storageGetPath() {
@@ -29,13 +28,8 @@ async function storeEulaAccepted() {
 }
 
 async function isMainKeyCreated() {
-    let salt = await storageGetItem(DERIVED_KEY_SALT);
-    if (salt == null) {
-        return false;
-    }
-
-    let encryptedMainKeyJson = await storageGetItem(ENCRYPTED_MAIN_KEY);
-    if (encryptedMainKeyJson == null) {
+    let mainKeyRecordJson = await storageGetItem(ENCRYPTED_MAIN_KEY);
+    if (mainKeyRecordJson == null) {
         return false;
     }
 
@@ -43,26 +37,25 @@ async function isMainKeyCreated() {
 }
 
 async function storageDecryptMainKey(passphrase) {
-    let salt = await storageGetItem(DERIVED_KEY_SALT);
-    if (salt == null) {
-        throw new Error('storageDecryptMainKey DERIVED_KEY_SALT does not exist.');
-    }
-    let saltArray = base64ToBytes(salt);
-
-    let encryptedMainKeyJson = await storageGetItem(ENCRYPTED_MAIN_KEY);
-    if (encryptedMainKeyJson == null) {
-        throw new Error('storageDecryptMainKey DERIVED_KEY_SALT exists but ENCRYPTED_MAIN_KEY does ont exist.');
+    let mainKeyRecordJson = await storageGetItem(ENCRYPTED_MAIN_KEY);
+    if (mainKeyRecordJson == null) {
+        throw new Error('storageDecryptMainKey ENCRYPTED_MAIN_KEY does not exist.');
     }
 
-    let encryptedMainKey = JSON.parse(encryptedMainKeyJson);
-    
+    let mainKeyRecord = JSON.parse(mainKeyRecordJson);
+    if (mainKeyRecord.salt == null || mainKeyRecord.payload == null) {
+        throw new Error('storageDecryptMainKey ENCRYPTED_MAIN_KEY record is malformed.');
+    }
+
+    let saltArray = base64ToBytes(mainKeyRecord.salt);
+
     let derivedKey = await cryptoApiScrypt(passphrase, saltArray);
     if (derivedKey == null) {
         throw new Error('storageDecryptMainKey cryptoApiScrypt failed.');
     }
 
     let derivedKeyArray = base64ToBytes(derivedKey.key);
-    let mainKeyBase64 = await cryptoApiDecrypt(derivedKeyArray, encryptedMainKey);
+    let mainKeyBase64 = await cryptoApiDecrypt(derivedKeyArray, mainKeyRecord.payload);
     if (mainKeyBase64 == null) {
         throw new Error('storageDecryptMainKey cryptoApiDecrypt failed.');
     }
@@ -95,15 +88,18 @@ async function storageDecryptData(passphrase, encryptedDataString) {
         passphrase+salt -> (scrypt) -> derivedKey -> (encrypts) -> mainKey -> (encrypts) -> (other data)
 
     derivedKey : A key that is derived using scrypt from the passphrase. It is not saved to storage.
-    salt : The salt used for creating the derivedKey from the passphrase. The salt is created the first time. It is saved to storage.
-    mainKey : An aes key that is created in random. It is created only the first time. This key is used to encrypt all other data. This key is encrypted with the derivedKey and the encrypted key is saved to storage.
+    salt : The salt used for creating the derivedKey from the passphrase. The salt is created the first time. It is saved to storage inside the single atomic main-key record (DUR-02).
+    mainKey : An aes key that is created in random. It is created only the first time. This key is used to encrypt all other data. This key is encrypted with the derivedKey and the encrypted key is saved to storage (as { salt, payload } under ENCRYPTED_MAIN_KEY).
 */
 async function storageCreateMainKey(passphrase) {
-    let salt = await StorageApi.GetItem(DERIVED_KEY_SALT);
-    if (salt != null) {
-        throw new Error('storageCreateMainKey DERIVED_KEY_SALT already exists.');
-    }
+    // DUR-04: serialize main-key creation against other surfaces so two contexts
+    // cannot both create/overwrite the vault main key at once.
+    return await qcWithLock(QC_LOCK_VAULT, async function () {
+        return await storageCreateMainKeyInternal(passphrase);
+    });
+}
 
+async function storageCreateMainKeyInternal(passphrase) {
     let encryptedMainKeyCheck = await StorageApi.GetItem(ENCRYPTED_MAIN_KEY);
     if (encryptedMainKeyCheck != null) {
         throw new Error('storageCreateMainKey MAIN_KEY already exists.');
@@ -114,19 +110,20 @@ async function storageCreateMainKey(passphrase) {
         throw new Error('storageCreateMainKey cryptoApiScryptAutoSalt failed.');
     }
 
-    let storeSaltResult = await storageSetItem(DERIVED_KEY_SALT, derivedKey.salt);
-    if (storeSaltResult != true) {
-        throw new Error('storageCreateMainKey storageSetItem DERIVED_KEY_SALT failed.');
-    }
-
     let mainKeyArray = await cryptoNewAesKey();
     let mainKeyBase64 = bytesToBase64(mainKeyArray);
     let derivedKeyArray = base64ToBytes(derivedKey.key);
 
     let encryptedMainKey = await cryptoApiEncrypt(derivedKeyArray, mainKeyBase64);
-    let encryptedMainKeyJson = JSON.stringify(encryptedMainKey);
 
-    let encryptedKeyStoreResult = await storageSetItem(ENCRYPTED_MAIN_KEY, encryptedMainKeyJson);
+    // DUR-02: persist salt + encrypted main key as a single atomic record so an
+    // interrupted write can never leave a salt-only (bricked) state.
+    let mainKeyRecord = {
+        salt: derivedKey.salt,
+        payload: encryptedMainKey
+    };
+
+    let encryptedKeyStoreResult = await storageSetItem(ENCRYPTED_MAIN_KEY, JSON.stringify(mainKeyRecord));
     if (encryptedKeyStoreResult != true) {
         throw new Error('storageCreateMainKey storageSetItem ENCRYPTED_MAIN_KEY failed.');
     }

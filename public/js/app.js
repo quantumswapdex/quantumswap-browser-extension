@@ -706,7 +706,16 @@ async function populateRestoreSeedAutoComplete(wordCount) {
     document.getElementById('txtRestoreSeedA1').focus();
 }
 
-async function copyNewSeed() {
+// SEC-08: warn before writing the seed words to the shared system clipboard
+// (same gate as copyRevealSeed; this is the new-wallet creation copy path).
+function copyNewSeed() {
+    showYesNoConfirm(
+        langJson.langValues.revealSeedClipboardWarn,
+        function () { doCopyNewSeed().catch(function () { showWarnAlert(getGenericError("")); }); }
+    );
+}
+
+async function doCopyNewSeed() {
     var wordCount = tempSeedArray.length / 2;
     var wordList = await getWordListFromSeedArrayAsync(tempSeedArray);
     var copyText = SEED_FRIENDLY_INDEX_ARRAY[0].toUpperCase() + " = " + wordList[0].toUpperCase() + "\r\n";
@@ -716,7 +725,15 @@ async function copyNewSeed() {
     await WriteTextToClipboard(copyText);
 }
 
-async function copyRevealSeed() {
+// SEC-08: warn before writing the seed words to the shared system clipboard.
+function copyRevealSeed() {
+    showYesNoConfirm(
+        langJson.langValues.revealSeedClipboardWarn,
+        function () { doCopyRevealSeed().catch(function () { showWarnAlert(getGenericError("")); }); }
+    );
+}
+
+async function doCopyRevealSeed() {
     var wordCount = revealSeedArray.length / 2;
     var wordList = await getWordListFromSeedArrayAsync(revealSeedArray);
     var copyText = SEED_FRIENDLY_INDEX_ARRAY[0].toUpperCase() + " = " + wordList[0].toUpperCase() + "\r\n";
@@ -817,7 +834,10 @@ function verifyWalletPassword() {
     } else {
         tempPassword = password;
     }
-    
+    // SEC-07: the password now lives only in tempPassword for the save/backup
+    // flow; remove the cleartext copy from the DOM input.
+    document.getElementById("pwdVerifyWalletPassword").value = "";
+
     showLoadingAndExecuteAsync(langJson.langValues.waitWalletSave, saveWallet);
 }
 
@@ -869,8 +889,10 @@ async function saveWallet() {
         showAlertAndExecuteOnClose(langJson.langValues.walletSaved, showBackupWalletScreen);
     }
     catch (error) {
+        // SEC-11: log the detail; show only the generic message (no raw error).
+        console.error("saveWallet failed:", error);
         hideWaitingBox();
-        showWarnAlert(langJson.errors.walletPasswordMismatch + " " + error);
+        showWarnAlert(langJson.errors.walletPasswordMismatch);
     }
     return true;
 }
@@ -1128,8 +1150,12 @@ function showWalletListScreen() {
     for (const [address, index] of walletMap.entries()) {
         
         let shortAddress = getShortAddress(address);
-        let row = walletListRowTemplate.replaceAll(ADDRESS_TEMPLATE, address);
-        row = row.replaceAll(SHORT_ADDRESS_TEMPLATE, shortAddress);
+        // item 14: the [ADDRESS] substitution feeds single-quoted inline onclick
+        // args (e.g. OpenScanAddress('[ADDRESS]')); attribute-encode it so a
+        // malformed address can't break out of the quoted arg. Valid hex addresses
+        // are unaffected, and csp-rehydrate reads the decoded attribute value.
+        let row = walletListRowTemplate.replaceAll(ADDRESS_TEMPLATE, htmlAttrEncode(address));
+        row = row.replaceAll(SHORT_ADDRESS_TEMPLATE, htmlAttrEncode(shortAddress));
 
         row = row.replace('[SHORT_ADDRESS_TAB_INDEX]', tabIndex.toString());
         tabIndex = tabIndex + 1;
@@ -1306,6 +1332,8 @@ function showRevealSeedPanel() {
 
 async function revealSeedWallet() {
     var password = document.getElementById("pwdRevealSeedScreenPassword").value;
+    // SEC-07: drop the cleartext password from the DOM as soon as it is captured.
+    document.getElementById("pwdRevealSeedScreenPassword").value = "";
     var specificWallet;
     try {
         specificWallet = await walletGetByAddress(password, specificWalletAddress);
@@ -1316,8 +1344,10 @@ async function revealSeedWallet() {
         }
     }
     catch (error) {
+        // SEC-11: log the detail; show only the generic wallet-open message.
+        console.error("revealSeedWallet failed:", error);
         hideWaitingBox();
-        showWarnAlert(langJson.errors.walletOpenError.replace(STORAGE_PATH_TEMPLATE, STORAGE_PATH) + " " + error)
+        showWarnAlert(langJson.errors.walletOpenError.replace(STORAGE_PATH_TEMPLATE, STORAGE_PATH))
         return;
     }
 
@@ -1398,12 +1428,14 @@ function unlockWallet() {
 
 async function decryptAndUnlockWallet() {
     var password = document.getElementById("pwdUnlock").value;
+    // SEC-07: drop the cleartext password from the DOM as soon as it is captured.
+    document.getElementById("pwdUnlock").value = "";
 
     try {
         let walletList = await walletLoadAll(password);
         if (walletList == null || walletList.length < 1) {
             hideWaitingBox();
-            showWarnAlert(langJson.errors.walletOpenError.replace(STORAGE_PATH_TEMPLATE, STORAGE_PATH) + " " + error)
+            showWarnAlert(langJson.errors.walletOpenError.replace(STORAGE_PATH_TEMPLATE, STORAGE_PATH))
             return;
         }
         let walletReverseMap = walletGetCachedIndexToAddressMap();
@@ -1414,8 +1446,10 @@ async function decryptAndUnlockWallet() {
         setWalletAddressAndShowWalletScreen(walletAddress);
     }
     catch (error) {
+        // SEC-11: keep decrypt/error detail out of the UI; log it for debugging.
+        console.error("decryptAndUnlockWallet failed:", error);
         hideWaitingBox();
-        showWarnAlert(langJson.errors.walletOpenError.replace(STORAGE_PATH_TEMPLATE, STORAGE_PATH) + " " + error)
+        showWarnAlert(langJson.errors.walletOpenError.replace(STORAGE_PATH_TEMPLATE, STORAGE_PATH))
         return;
     }
     return false;
@@ -1585,7 +1619,14 @@ function buildAddNetworkConfirmDetails() {
         if (name === "") {
             return "\n\n" + lv.addNetworkCheckMissingName;
         }
-        return "\n\n" + lv.addNetworkNewPrefix + name;
+        // item 3: also show the RPC endpoint the user is about to trust, so a
+        // benign-looking network name can't hide a hostile RPC host.
+        let details = "\n\n" + lv.addNetworkNewPrefix + name;
+        let rpc = obj && obj.rpcEndpoint != null ? String(obj.rpcEndpoint).trim() : "";
+        if (rpc !== "") {
+            details += "\n" + (lv.addNetworkRpcPrefix || "RPC endpoint : ") + rpc;
+        }
+        return details;
     } catch (e) {
         return "\n\n" + lv.addNetworkCheckInvalidJson;
     }
@@ -1653,7 +1694,7 @@ async function refreshAccountBalance() {
         if (isNetworkError(error)) {
             showWarnAlert(langJson.errors.internetDisconnected);
         } else {
-            showWarnAlert(langJson.errors.invalidApiResponse + ' ' + error);
+            { console.error(error); showWarnAlert(langJson.errors.invalidApiResponse); }
         }
     }
 }
@@ -1687,7 +1728,7 @@ function buildTokenRowsHtml(tokenList) {
 
         tokenRow = tokenRow.replace('[TOKEN_SYMBOL]', tokenSymbol);
         tokenRow = tokenRow.replace('[TOKEN_NAME]', tokenName);
-        tokenRow = tokenRow.replace('[TOKEN_CONTRACT]', token.contractAddress);
+        tokenRow = tokenRow.replace('[TOKEN_CONTRACT]', htmlAttrEncode(token.contractAddress));
         tokenRow = tokenRow.replace('[SHORT_CONTRACT]', tokenShortContractAddress);
         tokenRow = tokenRow.replace('[TOKEN_BALANCE]', token.tokenBalance);
 
@@ -1758,6 +1799,11 @@ async function refreshTokenList() {
     for (var i = 0; i < tokenListDetails.tokenList.length; i++) {
         let token = tokenListDetails.tokenList[i];
         if (htmlEncode(token.name) !== token.name || htmlEncode(token.symbol) !== token.symbol) {
+            continue;
+        }
+        // item 8: drop tokens whose name/symbol carry spoofing Unicode (bidi
+        // overrides, zero-width/format chars) used to disguise scam tokens.
+        if (containsUnsafeDisplayText(token.name) || containsUnsafeDisplayText(token.symbol)) {
             continue;
         }
         safeTokenList.push(token);
@@ -1838,7 +1884,7 @@ async function refreshAccountBalanceBackground() {
             if (isNetworkError(error)) {
                 showWarnAlert(langJson.errors.internetDisconnected);
             } else {
-                showWarnAlert(langJson.errors.invalidApiResponse + ' ' + error);
+                { console.error(error); showWarnAlert(langJson.errors.invalidApiResponse); }
             }
         }        
     }
@@ -2106,6 +2152,8 @@ function getSwapTokenListFromWallet() {
             var t = currentWalletTokenList[i];
             if (!t.symbol || !t.name || !t.contractAddress) continue;
             if (htmlEncode(t.name) !== t.name || htmlEncode(t.symbol) !== t.symbol) continue;
+            // item 8: exclude tokens with spoofing Unicode in name/symbol.
+            if (containsUnsafeDisplayText(t.name) || containsUnsafeDisplayText(t.symbol)) continue;
             if (!SWAP_SHOW_NATIVE_COIN && typeof HEISEN_CONTRACT_ADDRESS !== "undefined" && (t.contractAddress || "").toLowerCase() === (HEISEN_CONTRACT_ADDRESS || "").toLowerCase()) continue;
             list.push({
                 value: t.contractAddress,
@@ -2428,13 +2476,27 @@ function getWalletKeyType() {
 // Per-screen current gas state. Reset on screen open. `overridden` is true once the
 // user edits values via the Gas dialog; the label is then not refetched until the
 // transaction context changes again.
-var currentGasConfig = { gasLimit: null, gasFee: null, overridden: false };
+// item 5: gasPriceWei pins the exact per-gas-unit price behind the displayed fee
+// so the signed tx uses the price the user reviewed (not one re-fetched at submit).
+var currentGasConfig = { gasLimit: null, gasFee: null, gasPriceWei: null, overridden: false };
 var gasEstimateTimerId = null;
 var gasEstimateToken = 0;
 
 // Additional gas-state objects for the swap sub-flows (approve/remove/add use their
 // own context so they don't clash with the swap-execute estimate).
-var swapApproveGasState = { gasLimit: null, gasFee: null, overridden: false };
+var swapApproveGasState = { gasLimit: null, gasFee: null, gasPriceWei: null, overridden: false };
+
+// item 5: derive a decimal-wei per-gas-unit price from a displayed fee (coins) and
+// gas limit, for the cases where the node didn't return an exact price (user
+// override / offline / RPC fallback). Returns null when it can't be computed.
+function computeGasPriceWei(gasFeeEth, gasLimit) {
+    var fee = parseFloat(gasFeeEth);
+    var gl = parseFloat(gasLimit);
+    if (isNaN(fee) || isNaN(gl) || gl <= 0) return null;
+    var wei = Math.round((fee * 1e18) / gl);
+    if (!isFinite(wei) || wei < 0) return null;
+    return String(wei);
+}
 
 // Format the gas fee as a number string with no trailing zeros (LSB only).
 // Decimals are shown only when present: 110 -> "110", 0.5 -> "0.5", 0.0476 -> "0.0476".
@@ -2477,6 +2539,7 @@ function resetCurrentGasConfig(state) {
     var s = state || currentGasConfig;
     s.gasLimit = null;
     s.gasFee = null;
+    s.gasPriceWei = null;
     s.overridden = false;
     if (gasEstimateTimerId) { clearTimeout(gasEstimateTimerId); gasEstimateTimerId = null; }
     gasEstimateToken++;
@@ -2490,6 +2553,7 @@ function applyOfflineGasConfig(defaultGasLimit, labelId, state) {
     var gasFee = (gasLimit * SWAP_GAS_FEE_RATE);
     s.gasLimit = String(gasLimit);
     s.gasFee = String(gasFee);
+    s.gasPriceWei = computeGasPriceWei(gasFee, gasLimit);
     s.overridden = false;
     if (labelId) setGasFeeLabel(labelId, gasFee);
 }
@@ -2611,6 +2675,7 @@ async function runGasEstimation(ctxProvider, iconId, labelId, state, onRpcError)
     var fullSign = await advancedSigningGetDefaultValue();
     var keyType = getWalletKeyType();
     var gasFee = null;
+    var gasPriceWei = null; // item 5: exact per-gas-unit price from the node, when available
     try {
         var feeRes = await estimateGasFee({
             rpcEndpoint: currentBlockchainNetwork.rpcEndpoint,
@@ -2622,6 +2687,7 @@ async function runGasEstimation(ctxProvider, iconId, labelId, state, onRpcError)
         if (myToken !== s._token) { setGasIconPulse(iconId, false); return; }
         if (feeRes && feeRes.success && feeRes.gasFeeEth != null) {
             gasFee = feeRes.gasFeeEth;
+            if (feeRes.gasPriceWei != null) gasPriceWei = String(feeRes.gasPriceWei);
             if (feeRes.usedFallback === true) {
                 rpcError = true;
                 if (feeRes.error) rpcErrorMessage = feeRes.error;
@@ -2644,6 +2710,8 @@ async function runGasEstimation(ctxProvider, iconId, labelId, state, onRpcError)
     if (myToken === s._token && !s.overridden) {
         s.gasLimit = String(gasLimit);
         s.gasFee = String(gasFee);
+        // item 5: prefer the node's exact price; else derive from the shown fee.
+        s.gasPriceWei = (gasPriceWei != null) ? gasPriceWei : computeGasPriceWei(gasFee, gasLimit);
         s.overridden = false;
         if (labelId) setGasFeeLabel(labelId, s.gasFee);
         setGasIconPulse(iconId, false);
@@ -2677,6 +2745,8 @@ function onGasIconClick(labelId, state, ctxProvider) {
             s._token = gasEstimateToken;
             s.gasLimit = String(result.gasLimit);
             s.gasFee = String(result.gasFee);
+            // item 5: pin the price implied by the user's edited fee + limit.
+            s.gasPriceWei = computeGasPriceWei(result.gasFee, result.gasLimit);
             s.overridden = true;
             if (labelId) setGasFeeLabel(labelId, s.gasFee);
         }
@@ -2685,18 +2755,23 @@ function onGasIconClick(labelId, state, ctxProvider) {
 }
 
 // Resolve the gas limit + fee to use for submission/review, falling back to defaults.
+// item 5: also returns gasPriceWei (the pinned per-gas-unit price) so submit
+// payloads can forward it to the signer.
 function resolveGasForTx(defaultGasLimit, state) {
     var s = state || currentGasConfig;
     if (s.gasLimit != null && s.gasLimit !== "") {
         var gl = parseInt(s.gasLimit, 10);
         if (!isNaN(gl) && gl > 0) {
             var fee = s.gasFee != null ? s.gasFee : (gl * SWAP_GAS_FEE_RATE);
-            return { gasLimit: String(gl), gasFee: formatGasFeeQ(fee) };
+            var priceWei = (s.gasPriceWei != null) ? s.gasPriceWei : computeGasPriceWei(fee, gl);
+            return { gasLimit: String(gl), gasFee: formatGasFeeQ(fee), gasPriceWei: priceWei };
         }
     }
+    var defFee = defaultGasLimit * SWAP_GAS_FEE_RATE;
     return {
         gasLimit: String(defaultGasLimit),
-        gasFee: formatGasFeeQ(defaultGasLimit * SWAP_GAS_FEE_RATE)
+        gasFee: formatGasFeeQ(defFee),
+        gasPriceWei: computeGasPriceWei(defFee, defaultGasLimit)
     };
 }
 
@@ -2985,7 +3060,8 @@ async function submitSwapTransaction(quantumWallet) {
     var fromQty = (document.getElementById("txtSwapFromQuantity").value || "").trim();
     var toQty = (document.getElementById("txtSwapToQuantity").value || "").trim();
     var slippagePercent = parseFloat(document.getElementById("txtSwapSlippage").value) || 1;
-    var gas = parseInt(resolveGasForTx(SWAP_DEFAULT_GAS).gasLimit, 10);
+    var resolvedGas = resolveGasForTx(SWAP_DEFAULT_GAS);
+    var gas = parseInt(resolvedGas.gasLimit, 10);
     try {
         var result = await submitSwapSwap({
             rpcEndpoint: currentBlockchainNetwork.rpcEndpoint,
@@ -3002,6 +3078,7 @@ async function submitSwapTransaction(quantumWallet) {
             privateKey: await quantumWallet.getPrivateKey(),
             publicKey: await quantumWallet.getPublicKey(),
             gasLimit: gas,
+            gasPriceWei: resolvedGas.gasPriceWei,
             advancedSigningEnabled: await advancedSigningGetDefaultValue()
         });
         if (!result || !result.success || !result.txHash) {
@@ -3019,7 +3096,8 @@ async function submitSwapTransaction(quantumWallet) {
 
 async function submitRemoveAllowanceTransaction(quantumWallet) {
     var fromValue = document.getElementById("ddlSwapFromToken").value;
-    var gas = parseInt(resolveGasForTx(APPROVE_DEFAULT_GAS, swapApproveGasState).gasLimit, 10);
+    var resolvedGas = resolveGasForTx(APPROVE_DEFAULT_GAS, swapApproveGasState);
+    var gas = parseInt(resolvedGas.gasLimit, 10);
     try {
         var result = await submitSwapRemoveAllowance({
             rpcEndpoint: currentBlockchainNetwork.rpcEndpoint,
@@ -3028,6 +3106,7 @@ async function submitRemoveAllowanceTransaction(quantumWallet) {
             privateKey: await quantumWallet.getPrivateKey(),
             publicKey: await quantumWallet.getPublicKey(),
             gasLimit: gas,
+            gasPriceWei: resolvedGas.gasPriceWei,
             advancedSigningEnabled: await advancedSigningGetDefaultValue()
         });
         if (!result || !result.success || !result.txHash) {
@@ -3053,7 +3132,8 @@ async function submitRemoveAllowanceTransaction(quantumWallet) {
 async function submitAddAllowanceTransaction(quantumWallet) {
     var fromValue = document.getElementById("ddlSwapFromToken").value;
     var approvalAmount = (document.getElementById("txtAddAllowanceQuantity").value || "").trim();
-    var gas = parseInt(resolveGasForTx(APPROVE_DEFAULT_GAS, swapApproveGasState).gasLimit, 10);
+    var resolvedGas = resolveGasForTx(APPROVE_DEFAULT_GAS, swapApproveGasState);
+    var gas = parseInt(resolvedGas.gasLimit, 10);
     if (!approvalAmount || parseFloat(approvalAmount) <= 0) {
         setAddAllowancePanelWaiting(false);
         showWarnAlert(langJson.errors.approvalQuantityRequired || "Approval quantity is required.");
@@ -3069,6 +3149,7 @@ async function submitAddAllowanceTransaction(quantumWallet) {
             privateKey: await quantumWallet.getPrivateKey(),
             publicKey: await quantumWallet.getPublicKey(),
             gasLimit: gas,
+            gasPriceWei: resolvedGas.gasPriceWei,
             advancedSigningEnabled: await advancedSigningGetDefaultValue()
         });
         if (!result || !result.success || !result.txHash) {
@@ -3422,7 +3503,7 @@ async function refreshTransactionListWithContext(isPrev) {
         if (isNetworkError(error)) {
             showWarnAlert(langJson.errors.internetDisconnected);
         } else {
-            showWarnAlert(langJson.errors.invalidApiResponse + ' ' + error);
+            { console.error(error); showWarnAlert(langJson.errors.invalidApiResponse); }
         }
 
         setTimeout(() => {
@@ -3469,17 +3550,17 @@ async function refreshTransactionListInner(isPending, isPrev) {
                 }
             }
         }
-        txnRow = txnRow.replaceAll("[FROM]", htmlEncode(txn.from));
+        txnRow = txnRow.replaceAll("[FROM]", htmlAttrEncode(txn.from));
 
         if (txn.to != null) { //to address can be null for smart-contract creation transactions
-            txnRow = txnRow.replaceAll("[TO]", htmlEncode(txn.to));
+            txnRow = txnRow.replaceAll("[TO]", htmlAttrEncode(txn.to));
             txnRow = txnRow.replaceAll("[SHORT_TO]", getShortAddress(txn.to));
         } else {
             txnRow = txnRow.replaceAll("[TO]", "");
             txnRow = txnRow.replaceAll("[SHORT_TO]", "");
         }        
 
-        txnRow = txnRow.replaceAll("[HASH]", htmlEncode(txn.hash));
+        txnRow = txnRow.replaceAll("[HASH]", htmlAttrEncode(txn.hash));
         txnRow = txnRow.replaceAll("[SHORT_FROM]", getShortAddress(txn.from));
         
         txnRow = txnRow.replaceAll("[SHORT_HASH]", getShortAddress(txn.hash));
@@ -3518,9 +3599,9 @@ function getPendingTxnRow(currAddressLower) {
     }
     let pendingTxn = pendingTransactionsMap.get(currAddressLower + currentBlockchainNetwork.index.toString());
     let txnRow = completedTxnOutRowTemplate;
-    txnRow = txnRow.replaceAll("[FROM]", htmlEncode(pendingTxn.from));
-    txnRow = txnRow.replaceAll("[TO]", htmlEncode(pendingTxn.to));
-    txnRow = txnRow.replaceAll("[HASH]", htmlEncode(pendingTxn.hash));
+    txnRow = txnRow.replaceAll("[FROM]", htmlAttrEncode(pendingTxn.from));
+    txnRow = txnRow.replaceAll("[TO]", htmlAttrEncode(pendingTxn.to));
+    txnRow = txnRow.replaceAll("[HASH]", htmlAttrEncode(pendingTxn.hash));
     txnRow = txnRow.replaceAll("[SHORT_FROM]", getShortAddress(pendingTxn.from));
     txnRow = txnRow.replaceAll("[SHORT_TO]", getShortAddress(pendingTxn.to));
     txnRow = txnRow.replaceAll("[SHORT_HASH]", getShortAddress(pendingTxn.hash));

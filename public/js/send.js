@@ -361,6 +361,7 @@ async function signOfflineTxnSendToken(quantumWallet) {
     var contractAddress = document.getElementById("txtTokenContractAddress").value;
 
     try {
+        var resolvedOffTok = resolveGasForTx(TOKEN_SEND_GAS);
         var result = await offlineSignTokenTransaction({
             chainId: parseInt(currentBlockchainNetwork.networkId, 10),
             toAddress: sendAddress,
@@ -368,7 +369,8 @@ async function signOfflineTxnSendToken(quantumWallet) {
             contractAddress: contractAddress,
             fromDecimals: getSwapTokenDecimals(contractAddress),
             nonce: parseInt(currentNonce),
-            gasLimit: parseInt(resolveGasForTx(TOKEN_SEND_GAS).gasLimit, 10),
+            gasLimit: parseInt(resolvedOffTok.gasLimit, 10),
+            gasPriceWei: resolvedOffTok.gasPriceWei,
             privateKey: await quantumWallet.getPrivateKey(),
             publicKey: await quantumWallet.getPublicKey(),
             advancedSigningEnabled: await advancedSigningGetDefaultValue()
@@ -405,12 +407,14 @@ async function signOfflineTxnSend(quantumWallet) {
     var currentNonce = document.getElementById("txtCurrentNonce").value;
 
     try {
+        var resolvedOffCoin = resolveGasForTx(COIN_SEND_GAS);
         var result = await offlineSignCoinTransaction({
             chainId: parseInt(currentBlockchainNetwork.networkId, 10),
             toAddress: sendAddress,
             amount: sendQuantity,
             nonce: parseInt(currentNonce),
-            gasLimit: parseInt(resolveGasForTx(COIN_SEND_GAS).gasLimit, 10),
+            gasLimit: parseInt(resolvedOffCoin.gasLimit, 10),
+            gasPriceWei: resolvedOffCoin.gasPriceWei,
             privateKey: await quantumWallet.getPrivateKey(),
             publicKey: await quantumWallet.getPublicKey(),
             advancedSigningEnabled: await advancedSigningGetDefaultValue()
@@ -569,6 +573,7 @@ async function sendCoinsSubmit(quantumWallet) {
             privateKey: await quantumWallet.getPrivateKey(),
             publicKey: await quantumWallet.getPublicKey(),
             gasLimit: gasLimit,
+            gasPriceWei: resolved.gasPriceWei,
             advancedSigningEnabled: await advancedSigningGetDefaultValue()
         });
 
@@ -592,7 +597,7 @@ async function sendCoinsSubmit(quantumWallet) {
         if (isNetworkError(error)) {
             showWarnAlert(langJson.errors.internetDisconnected);
         } else {
-            showWarnAlert(langJson.errors.invalidApiResponse + ' ' + error);
+            { console.error(error); showWarnAlert(langJson.errors.invalidApiResponse); }
         }
     }
 }
@@ -618,6 +623,7 @@ async function sendTokensSubmit(quantumWallet) {
             privateKey: await quantumWallet.getPrivateKey(),
             publicKey: await quantumWallet.getPublicKey(),
             gasLimit: gasLimitTok,
+            gasPriceWei: resolvedTok.gasPriceWei,
             advancedSigningEnabled: await advancedSigningGetDefaultValue()
         });
 
@@ -641,7 +647,7 @@ async function sendTokensSubmit(quantumWallet) {
         if (isNetworkError(error)) {
             showWarnAlert(langJson.errors.internetDisconnected);
         } else {
-            showWarnAlert(langJson.errors.invalidApiResponse + ' ' + error);
+            { console.error(error); showWarnAlert(langJson.errors.invalidApiResponse); }
         }
     }
 }

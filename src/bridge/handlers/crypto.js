@@ -1,7 +1,8 @@
 // Ported from the Crypto/Wallet ipcMain.handle handlers in the desktop src/index.js.
-// All crypto is now browser-native: AES-256-CBC uses the Web Crypto API
-// (`globalThis.crypto.subtle`), and scrypt/randomBytes come from quantumcoin's
-// native (WASM + Web Crypto) implementations. No Node `crypto` shim is required.
+// All crypto is now browser-native: the vault uses authenticated AES-256-GCM via
+// the Web Crypto API (`globalThis.crypto.subtle`), and scrypt/randomBytes come
+// from quantumcoin's native (WASM + Web Crypto) implementations. No Node `crypto`
+// shim is required.
 import { Initialize } from "quantumcoin/config";
 import {
   Wallet,
@@ -22,22 +23,14 @@ function bytesToBase64(bytes) {
   return btoa(binString);
 }
 
-function hexToBytes(hex) {
-  const clean = hex.startsWith("0x") ? hex.slice(2) : hex;
-  const out = new Uint8Array(clean.length / 2);
-  for (let i = 0; i < out.length; i++) {
-    out[i] = parseInt(clean.substr(i * 2, 2), 16);
-  }
-  return out;
-}
-
-// AES-256-CBC via Web Crypto. The browser applies PKCS#7 padding, matching Node's
-// `aes-256-cbc`, so keystores created by the desktop app remain decryptable here.
+// Vault symmetric crypto via Web Crypto. The vault is authenticated AES-256-GCM
+// only: a fresh 12-byte IV, with the 16-byte auth tag appended to the ciphertext
+// by Web Crypto, so any tampering is detected (decrypt throws -> fails closed).
 async function importAesKey(keyBytes, usages) {
   return globalThis.crypto.subtle.importKey(
     "raw",
     keyBytes,
-    { name: "AES-CBC" },
+    { name: "AES-GCM" },
     false,
     usages,
   );
@@ -50,7 +43,7 @@ export default {
 
     const key = await importAesKey(aesKey, ["encrypt"]);
     const cipherBytes = await globalThis.crypto.subtle.encrypt(
-      { name: "AES-CBC", iv: aesIV },
+      { name: "AES-GCM", iv: aesIV },
       key,
       new TextEncoder().encode(data.plainText),
     );
@@ -64,19 +57,12 @@ export default {
 
     const key = await importAesKey(aesKey, ["decrypt"]);
     const plainBytes = await globalThis.crypto.subtle.decrypt(
-      { name: "AES-CBC", iv: aesIV },
+      { name: "AES-GCM", iv: aesIV },
       key,
       base64ToBytes(data.cipherText),
     );
 
     return new TextDecoder().decode(plainBytes);
-  },
-
-  async CryptoApiScrypt(data) {
-    await Initialize(null);
-    const salt = base64ToBytes(data.salt);
-    const hexKey = scryptSync(data.secret, salt, 16384, 8, 1, 32);
-    return bytesToBase64(hexToBytes(hexKey));
   },
 
   async CryptoRandomBytes(data) {

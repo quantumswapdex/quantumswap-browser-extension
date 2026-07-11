@@ -107,7 +107,13 @@
     </section>
 
     <section id="sendSection">
-        <h2>4. Send Tokens</h2>
+        <h2>4. Send Tokens / Coins</h2>
+        <p class="muted">
+            Both transfers go through the standard <code>qc_sendTransaction</code>
+            (<code>eth_sendTransaction</code>): native coins via <code>value</code>, and tokens via
+            ERC20 <code>transfer(...)</code> calldata to the contract (with <code>abi</code> so the wallet
+            can decode and verify WYSIWYS before signing). Amounts are entered in whole units (18 decimals).
+        </p>
         <label for="contractInput">Token contract address</label>
         <input id="contractInput" type="text" placeholder="0x… (32-byte token contract)" />
         <label for="toInput">To address</label>

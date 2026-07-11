@@ -112,11 +112,53 @@ export default defineBackground(() => {
 
   // ---- dApp broker ------------------------------------------------------
   const pending = new Map<string, PendingRequest>();
+  // SEC-03: cap concurrent approval popups so a malicious/buggy dApp cannot spam
+  // unbounded OS windows (resource-exhaustion DoS / approval fatigue).
+  const MAX_PENDING_APPROVALS = 5;
   // Active relay ports (one per connected dApp tab). An open port keeps the
   // service worker alive for the duration of a request and is the durable
   // channel we push responses + events back through.
   const ports = new Set<any>();
-  let reqCounter = 0;
+
+  // item 26: per-origin approval throttle. Reject a second approval opened by the
+  // same origin within MIN_INTERVAL_MS, and impose a brief cooldown after a user
+  // rejection, so a malicious/buggy dApp cannot sequentially flood approval popups
+  // (approval fatigue / DoS) even under the MAX_PENDING_APPROVALS cap.
+  const APPROVAL_MIN_INTERVAL_MS = 1000;
+  const APPROVAL_REJECT_COOLDOWN_MS = 2000;
+  const lastApprovalOpenedAt = new Map<string, number>();
+  const approvalCooldownUntil = new Map<string, number>();
+
+  function markApprovalRejected(origin: string) {
+    if (origin) approvalCooldownUntil.set(origin, Date.now() + APPROVAL_REJECT_COOLDOWN_MS);
+  }
+
+  // item 1: a broker control message is only trusted when it originates from this
+  // extension's OWN pages (never a content script or web page, which would carry a
+  // web origin/url). `page`, when given, additionally pins the exact extension page
+  // allowed to send that message.
+  function isSelfPage(sender: any, page: string | null): boolean {
+    if (!sender || sender.id !== ext.runtime.id) return false;
+    const url = typeof sender.url === "string" ? sender.url : "";
+    const base = ext.runtime.getURL("");
+    if (!base || !url.startsWith(base)) return false;
+    if (page) {
+      const rest = url.slice(base.length).split(/[?#]/)[0];
+      return rest === page;
+    }
+    return true;
+  }
+
+  // The extension page each broker control message must come from.
+  function expectedSenderPage(type: string): string | null {
+    if (type === "qc-approval-getRequest" || type === "qc-approval-result" || type === "qc-approval-txBroadcast") {
+      return "approve.html";
+    }
+    if (type === "qc-active-account-changed" || type === "qc-active-network-changed") {
+      return "index.html";
+    }
+    return null;
+  }
 
   function safePost(port: any, msg: any) {
     try {
@@ -259,7 +301,29 @@ export default defineBackground(() => {
 
   function openApproval(method: string, params: any, origin: string, tabId: number | null): Promise<any> {
     return new Promise((resolve, reject) => {
-      const requestId = `${Date.now()}-${reqCounter++}`;
+      // SEC-03: reject before creating a window / registering the request when
+      // the pending-approval cap is reached, so no window or promise leaks. Slots
+      // free up as the user resolves or closes existing popups.
+      if (pending.size >= MAX_PENDING_APPROVALS) {
+        reject(new Error("Too many pending wallet approval requests. Please resolve the open request(s) first."));
+        return;
+      }
+      // item 26: per-origin throttle + post-rejection cooldown.
+      const now = Date.now();
+      const cooldownUntil = approvalCooldownUntil.get(origin) || 0;
+      if (origin && now < cooldownUntil) {
+        reject(new Error("Please wait a moment before requesting wallet approval again."));
+        return;
+      }
+      const last = lastApprovalOpenedAt.get(origin) || 0;
+      if (origin && now - last < APPROVAL_MIN_INTERVAL_MS) {
+        reject(new Error("Please wait a moment before requesting wallet approval again."));
+        return;
+      }
+      if (origin) lastApprovalOpenedAt.set(origin, now);
+      // crypto.randomUUID(): unguessable request id so a malicious page cannot
+      // predict/forge another pending request's id.
+      const requestId = crypto.randomUUID();
       pending.set(requestId, { resolve, reject, method, params, origin, tabId });
       const url = ext.runtime.getURL(`approve.html?requestId=${encodeURIComponent(requestId)}`);
       const done = (win?: any) => {
@@ -272,6 +336,7 @@ export default defineBackground(() => {
               const p = pending.get(requestId);
               if (p) {
                 pending.delete(requestId);
+                markApprovalRejected(p.origin);
                 p.reject(new Error("User rejected the request"));
               }
             }
@@ -334,10 +399,10 @@ export default defineBackground(() => {
   // so the dApp's provider.request(...) rejects immediately (no popup for junk).
   // Cheap, SDK-free checks; the approval page does an authoritative recheck.
   function isEthStyleAddress(a: any): boolean {
-    return typeof a === "string" && /^0x?[0-9a-fA-F]{40}$/.test(a.trim());
+    return typeof a === "string" && /^0x[0-9a-fA-F]{40}$/.test(a.trim());
   }
   function isQcHexAddress(a: any): boolean {
-    return typeof a === "string" && /^0x?[0-9a-fA-F]{64}$/.test(a.trim());
+    return typeof a === "string" && /^0x[0-9a-fA-F]{64}$/.test(a.trim());
   }
   function checkAddress(a: any): string | null {
     if (isEthStyleAddress(a)) {
@@ -352,16 +417,6 @@ export default defineBackground(() => {
         throw new Error("Invalid message: expected a non-empty string.");
       }
       return;
-    }
-    if (method === "qc_sendToken" || method === "qc_sendCoin") {
-      if (method === "qc_sendToken") {
-        const e = checkAddress(params.contractAddress);
-        if (e) throw new Error(e);
-      }
-      const toErr = checkAddress(params.to);
-      if (toErr) throw new Error(toErr);
-      const amt = Number(params.amount);
-      if (!isFinite(amt) || amt <= 0) throw new Error("Invalid amount.");
     }
     if (method === "qc_sendTransaction") {
       // Mirrors eth_sendTransaction: optional `to` (absent => contract creation),
@@ -494,6 +549,12 @@ export default defineBackground(() => {
 
   async function handleRpc(msg: any, sender: any): Promise<any> {
     const origin = sender?.origin || (sender?.url ? new URL(sender.url).origin : "");
+    // item 2: refuse opaque/undefined origins (e.g. sandboxed iframes report the
+    // literal string "null"). We must never store or look up a connected-site
+    // record keyed by such an origin, so reject every provider call from one.
+    if (!origin || origin === "null") {
+      throw new Error("This request has no verifiable site origin and was rejected.");
+    }
     const tabId = sender?.tab?.id ?? null;
     const params = msg.params || {};
     const sites = await getConnectedSites();
@@ -535,26 +596,6 @@ export default defineBackground(() => {
         validateRequest("qc_signMessage", params);
         const r = await openApproval("qc_signMessage", { ...params, address: active }, origin, tabId);
         return r.signature;
-      }
-      case "qc_sendToken": {
-        if (!active) throw new Error(notConnectedError);
-        validateRequest("qc_sendToken", params);
-        return await openApproval(
-          "qc_sendToken",
-          { ...params, from: active, network: site!.network, chainId: site!.chainId },
-          origin,
-          tabId,
-        );
-      }
-      case "qc_sendCoin": {
-        if (!active) throw new Error(notConnectedError);
-        validateRequest("qc_sendCoin", params);
-        return await openApproval(
-          "qc_sendCoin",
-          { ...params, from: active, network: site!.network, chainId: site!.chainId },
-          origin,
-          tabId,
-        );
       }
       case "qc_sendTransaction": {
         if (!active) throw new Error(notConnectedError);
@@ -604,6 +645,20 @@ export default defineBackground(() => {
   // page and the originating tab's port keeps the worker alive meanwhile).
   ext.runtime.onMessage.addListener((msg: any, sender: any, sendResponse: (r: any) => void) => {
     if (!msg || typeof msg.type !== "string") return;
+
+    // item 1: authenticate the sender. Every broker control message must come from
+    // this extension's own pages; approval messages specifically from approve.html
+    // and active-account/network messages from index.html. Reject anything else
+    // (a content script or web page could otherwise forge approvals/results).
+    if (!isSelfPage(sender, null)) {
+      try { sendResponse({ ok: false, error: "unauthorized sender" }); } catch { /* ignore */ }
+      return;
+    }
+    const requiredPage = expectedSenderPage(msg.type);
+    if (requiredPage && !isSelfPage(sender, requiredPage)) {
+      try { sendResponse({ ok: false, error: "unauthorized sender" }); } catch { /* ignore */ }
+      return;
+    }
 
     // The docked wallet switched active accounts. For each connected origin: if
     // the new address is in the origin's permitted set, expose it; otherwise mark
@@ -694,6 +749,7 @@ export default defineBackground(() => {
           }
           p.resolve(msg.result);
         } else {
+          markApprovalRejected(p.origin);
           p.reject(new Error(msg.error || "User rejected the request"));
         }
       }

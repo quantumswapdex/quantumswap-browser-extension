@@ -25,9 +25,22 @@ function isRecognizedToken(contract) {
     return RECOGNIZED_TOKEN_ADDRESSES.has(contract.toLowerCase());
 }
 
+// item 9: fold homoglyph/fullwidth/format-char tricks before matching so an
+// impersonator like "ＵＳＤ" (fullwidth), "U\u200bSD" (zero-width) or combining-mark
+// variants is still caught. NFKC maps compatibility forms to their canonical
+// ASCII-ish equivalents; then combining marks (U+0300–U+036F) and zero-width /
+// bidi format chars are stripped so they cannot break up a matched substring.
+function normalizeForImpersonatorMatch(value) {
+    if (value == null) return "";
+    let s = String(value);
+    try { s = s.normalize("NFKC"); } catch (e) { /* NFKC unsupported: use raw */ }
+    s = s.replace(/[\u0300-\u036F\u200B-\u200D\u2060\uFEFF\u202A-\u202E\u2066-\u2069]/g, "");
+    return s.toLowerCase();
+}
+
 function impersonatesStablecoin(symbol, name) {
-    let s = (symbol == null) ? "" : symbol.toLowerCase();
-    let n = (name == null) ? "" : name.toLowerCase();
+    let s = normalizeForImpersonatorMatch(symbol);
+    let n = normalizeForImpersonatorMatch(name);
     if (s.length === 0 && n.length === 0) {
         return false;
     }

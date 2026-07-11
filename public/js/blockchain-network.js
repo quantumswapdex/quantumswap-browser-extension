@@ -133,6 +133,14 @@ class BlockchainNetwork {
             throw new Error("BlockchainNetwork invalid URL")
         }
 
+        // item 16: blockExplorerDomain is concatenated into explorer URLs
+        // (https://<domain>/txn/<hash>, /account/<addr>). Validate it as a bare
+        // host with the same rule used for scanApiDomain so a network record can't
+        // smuggle a path/query/scheme (or attacker-controlled redirect target).
+        if (isValidDomainName(blockExplorerDomain) == false) {
+            throw new Error("BlockchainNetwork invalid block explorer URL")
+        }
+
         let id = parseInt(networkId);
 
         if (isNumber(id) == false) {

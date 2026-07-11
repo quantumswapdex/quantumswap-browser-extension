@@ -77,6 +77,7 @@ async function pauseValidationSubmit(quantumWallet) {
             methodArgs: [],
             value: "0",
             gasLimit: parseInt(resolveGasForTx(PAUSE_VALIDATION_GAS).gasLimit, 10),
+            gasPriceWei: resolveGasForTx(PAUSE_VALIDATION_GAS).gasPriceWei,
             privateKey: await quantumWallet.getPrivateKey(),
             publicKey: await quantumWallet.getPublicKey(),
             advancedSigningEnabled: await advancedSigningGetDefaultValue()
@@ -102,7 +103,7 @@ async function pauseValidationSubmit(quantumWallet) {
         if (isNetworkError(error)) {
             showWarnAlert(langJson.errors.internetDisconnected);
         } else {
-            showWarnAlert(langJson.errors.invalidApiResponse + ' ' + error);
+            { console.error(error); showWarnAlert(langJson.errors.invalidApiResponse); }
         }
     }
 }
@@ -118,6 +119,7 @@ async function pauseValidationOfflineSign(quantumWallet) {
             methodArgs: [],
             value: "0",
             gasLimit: parseInt(resolveGasForTx(PAUSE_VALIDATION_GAS).gasLimit, 10),
+            gasPriceWei: resolveGasForTx(PAUSE_VALIDATION_GAS).gasPriceWei,
             nonce: parseInt(currentNonce),
             privateKey: await quantumWallet.getPrivateKey(),
             publicKey: await quantumWallet.getPublicKey(),

@@ -26,12 +26,39 @@ window.FormatApi = makeApi();
 window.AppApi = makeApi();
 window.SeedWordsApi = makeApi();
 
-// StorageApi kept its Electron shape (synchronous localStorage wrappers). In the
-// popup document window.localStorage is available and persistent per extension.
+// Cross-surface serialization (DUR-04). The wallet UI can be open at the same
+// time as the side panel, the toolbar popup, a full tab, and the separate dApp
+// approval popup -- all same-origin and all sharing window.localStorage. The Web
+// Locks API serializes critical sections across every same-origin extension
+// surface (available in Chrome and Firefox 121+). Two distinct lock names are
+// used with a strict acquire order (VAULT outer, STORAGE_IO inner): the
+// higher-level wallet-store mutations take QC_LOCK_VAULT, and each StorageApi
+// write takes QC_LOCK_STORAGE_IO. StorageApi never takes QC_LOCK_VAULT, so the
+// ordering is consistent and nested locking cannot deadlock.
+const QC_LOCK_VAULT = "qc-vault";
+const QC_LOCK_STORAGE_IO = "qc-storage-io";
+
+function qcWithLock(name, fn) {
+  if (navigator.locks && typeof navigator.locks.request === "function") {
+    return navigator.locks.request(name, fn);
+  }
+  // Engines without the Web Locks API fall back to no cross-surface locking.
+  return Promise.resolve().then(fn);
+}
+
+window.qcWithLock = qcWithLock;
+window.QC_LOCK_VAULT = QC_LOCK_VAULT;
+window.QC_LOCK_STORAGE_IO = QC_LOCK_STORAGE_IO;
+
+// StorageApi kept its Electron shape (localStorage wrappers). SetItem now returns
+// a Promise because it serializes on QC_LOCK_STORAGE_IO; all callers already
+// await it. GetItem stays synchronous (single-key reads are atomic).
 window.StorageApi = {
   SetItem: function (key, value) {
-    window.localStorage.setItem(key, JSON.stringify(value));
-    return window.localStorage.getItem(key);
+    return qcWithLock(QC_LOCK_STORAGE_IO, function () {
+      window.localStorage.setItem(key, JSON.stringify(value));
+      return window.localStorage.getItem(key);
+    });
   },
   GetItem: function (key) {
     return window.localStorage.getItem(key);

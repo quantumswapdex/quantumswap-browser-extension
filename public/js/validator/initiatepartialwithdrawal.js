@@ -91,6 +91,7 @@ async function initiatePartialWithdrawalConfirmSubmit(quantumWallet) {
             methodArgs: [validatorDepositCoins],
             value: "0",
             gasLimit: parseInt(resolveGasForTx(INITIATE_PARTIAL_WITHDRAWAL_GAS).gasLimit, 10),
+            gasPriceWei: resolveGasForTx(INITIATE_PARTIAL_WITHDRAWAL_GAS).gasPriceWei,
             privateKey: await quantumWallet.getPrivateKey(),
             publicKey: await quantumWallet.getPublicKey(),
             advancedSigningEnabled: await advancedSigningGetDefaultValue()
@@ -116,7 +117,7 @@ async function initiatePartialWithdrawalConfirmSubmit(quantumWallet) {
         if (isNetworkError(error)) {
             showWarnAlert(langJson.errors.internetDisconnected);
         } else {
-            showWarnAlert(langJson.errors.invalidApiResponse + ' ' + error);
+            { console.error(error); showWarnAlert(langJson.errors.invalidApiResponse); }
         }
     }
 }
@@ -133,6 +134,7 @@ async function initiatePartialWithdrawalConfirmOfflineSign(quantumWallet) {
             methodArgs: [validatorDepositCoins],
             value: "0",
             gasLimit: parseInt(resolveGasForTx(INITIATE_PARTIAL_WITHDRAWAL_GAS).gasLimit, 10),
+            gasPriceWei: resolveGasForTx(INITIATE_PARTIAL_WITHDRAWAL_GAS).gasPriceWei,
             nonce: parseInt(currentNonce),
             privateKey: await quantumWallet.getPrivateKey(),
             publicKey: await quantumWallet.getPublicKey(),
