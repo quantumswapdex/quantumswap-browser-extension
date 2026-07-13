@@ -273,6 +273,10 @@
                     <img class="tab-icon" src="assets/svg/settings.svg" alt="Settings Icon">
                     <div class="tab-name" data-lang-key="settings">Settings</div>
                 </div>
+                <div class="burger-item disabled" id="tab5" role="button" tabindex="16" onclick="closeBurgerMenu(); return showReleasesScreen();">
+                    <img class="tab-icon" src="assets/svg/dex-swap-outline.svg" alt="Releases Icon">
+                    <div class="tab-name" data-lang-key="releases">Releases</div>
+                </div>
             </div>
         </div>
         <div class="dropdown" onclick="return showNetworkDialog();" id="divNetworkDropdown" role="button" tabindex="1000" style="display:none;">
@@ -280,6 +284,7 @@
         </div>
 
         <div class="gradient" id="gradient">
+            <div id="divCustomReleaseBanner" class="custom-release-banner" style="display:none;"></div>
             <div class="logo">
                 <img src="assets/icons/app/dp.png" alt="Title" class="logoimg" id="imgLogo">
             </div>
@@ -2019,6 +2024,84 @@
             </div>
         </div>
 
+        <div class="content" id="releaseListScreen" style="display: none;">
+            <div class="center-content">
+                <div class="center-content-rounded-container">
+                    <div class="back-container" role="button" onclick="showWalletScreen()" tabindex="3">
+
+                    </div>
+                    <div class="roundex-box" style="padding-top: 15px; padding-bottom: 15px;">
+                        <div>
+                            <div class="heading large" style="float:left;width:fit-content;" data-lang-key="releases">Releases</div>
+                        </div>
+                        <div class="divider"></div>
+                        <div class="blocks-content scrollbar" style="text-align: left; overflow: auto ;max-height:380px;" id="divReleaseList" tabindex="1">
+                            <table class="styled-table">
+                                <thead>
+                                    <tr>
+                                        <th data-lang-key="active">Active</th>
+                                        <th data-lang-key="name">Name</th>
+                                        <th data-lang-key="release-wq">WQ</th>
+                                        <th data-lang-key="release-factory">Factory</th>
+                                        <th data-lang-key="release-router">Router</th>
+                                        <th></th>
+                                    </tr>
+                                </thead>
+                                <tbody id="tbodyReleaseRow">
+                                </tbody>
+                            </table>
+                        </div>
+                        <div class="divider"></div>
+                        <div style="align-content:center;"><a href="#" data-lang-key="add-release" onclick="return showAddReleaseScreen();" tabindex="2">Add Release</a></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="content" id="releaseAddScreen" style="display: none;">
+            <div class="center-content">
+                <div class="center-content-rounded-container">
+                    <div class="back-container" role="button" onclick="showReleasesScreen()" tabindex="3">
+
+                    </div>
+                    <div class="roundex-box" style="padding-top: 15px; padding-bottom: 15px;">
+                        <div>
+                            <div class="heading large" style="float:left;width:fit-content;" data-lang-key="add-release">Add Release</div>
+                        </div>
+                        <div class="divider"></div>
+                        <div class="blocks-content scrollbar" style="text-align: left; overflow: auto ;">
+                            <div class="input_container">
+                                <div class="heading medium" data-lang-key="release-name">Release Name</div>
+                                <input class="tab-name"
+                                       style="text-align: left; width: 100%; border: none; outline: none; font-weight: 500; color: black; letter-spacing: 0.11em;"
+                                       type="text" autocomplete="off" id="txtReleaseName" name="release_name" maxlength="60" tabindex="1">
+                                <div class="divider"></div>
+                                <div class="heading medium" data-lang-key="release-wq-address">WQ Contract Address</div>
+                                <input class="tab-name"
+                                       style="text-align: left; width: 100%; border: none; outline: none; font-weight: 500; color: black; letter-spacing: 0.11em;"
+                                       type="text" autocomplete="off" id="txtReleaseWq" name="release_wq" placeholder="0x..." tabindex="2">
+                                <div class="divider"></div>
+                                <div class="heading medium" data-lang-key="release-factory-address">Factory Contract Address</div>
+                                <input class="tab-name"
+                                       style="text-align: left; width: 100%; border: none; outline: none; font-weight: 500; color: black; letter-spacing: 0.11em;"
+                                       type="text" autocomplete="off" id="txtReleaseFactory" name="release_factory" placeholder="0x..." tabindex="3">
+                                <div class="divider"></div>
+                                <div class="heading medium" data-lang-key="release-router-address">Router Contract Address</div>
+                                <input class="tab-name"
+                                       style="text-align: left; width: 100%; border: none; outline: none; font-weight: 500; color: black; letter-spacing: 0.11em;"
+                                       type="text" autocomplete="off" id="txtReleaseRouter" name="release_router" placeholder="0x..." tabindex="4">
+                                <div class="divider"></div>
+                            </div>
+                        </div>
+
+                        <div class="large_button_container heading large" onclick="addRelease();" style="float:right;" data-lang-key="add" role="button" tabindex="5">
+                            Add
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
 
     </div>
 
@@ -2407,6 +2490,7 @@
     <script src="js/wallet.js"></script>
     <script src="js/tokenfilter.js"></script>
     <script src="js/blockchain-network.js"></script>
+    <script src="js/release.js"></script>
     <script src="js/dialog.js"></script>
     <script src="js/app.js"></script>
     <script src="js/send.js"></script>

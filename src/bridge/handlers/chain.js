@@ -18,6 +18,11 @@ import {
   IERC20,
 } from "quantumswap";
 import { RECOGNIZED_TOKEN_CONTRACT_ADDRESSES } from "../token-constants.js";
+import {
+  SWAP_WQ_CONTRACT_ADDRESS,
+  SWAP_FACTORY_CONTRACT_ADDRESS,
+  SWAP_ROUTER_V2_CONTRACT_ADDRESS,
+} from "../release-constants.js";
 
 function signingOverrides(wallet, data, base) {
   const fullSign = data && data.advancedSigningEnabled === true;
@@ -38,23 +43,35 @@ function sanitizeSwapError(err) {
   return msg.replace(/uniswap/gi, "").trim();
 }
 
-const SWAP_WQ_CONTRACT_ADDRESS =
-  "0x0E49c26cd1ca19bF8ddA2C8985B96783288458754757F4C9E00a5439A7291628";
-const SWAP_FACTORY_CONTRACT_ADDRESS =
-  "0xbbF45a1B60044669793B444eD01Eb33e03Bb8cf3c5b6ae7887B218D05C5Cbf1d";
-const SWAP_ROUTER_V2_CONTRACT_ADDRESS =
-  "0x41323EF72662185f44a03ea0ad8094a0C9e925aB1102679D8e957e838054aac5";
+// ---- Release (deployment) resolution ----
+// Swap payloads may carry `releaseWq` / `releaseFactory` / `releaseRouter` to
+// target a user-selected release (custom deployment of the three core
+// contracts). Each present field must be a valid address (getAddress throws
+// otherwise, and the handler's catch surfaces the error rather than silently
+// swapping against the wrong deployment); absent fields fall back to the
+// built-in release from src/bridge/release-constants.js.
+function resolveSwapReleaseAddresses(data) {
+  function pick(raw, fallback) {
+    if (raw == null || typeof raw !== "string" || raw.trim() === "") return fallback;
+    return getAddress(raw.trim());
+  }
+  const d = data && typeof data === "object" ? data : {};
+  return {
+    wq: pick(d.releaseWq, SWAP_WQ_CONTRACT_ADDRESS),
+    factory: pick(d.releaseFactory, SWAP_FACTORY_CONTRACT_ADDRESS),
+    router: pick(d.releaseRouter, SWAP_ROUTER_V2_CONTRACT_ADDRESS),
+  };
+}
 
 // ---- Multi-hop swap routing ----
 // When no direct pair exists between the two tokens, a route is searched through
-// these intermediate hop candidates (wrapped Q + the recognized tokens from
-// src/bridge/token-constants.js), with at most SWAP_MAX_INTERMEDIATE_HOPS tokens
-// between the from- and to-token.
+// intermediate hop candidates (the release's wrapped Q + the recognized tokens
+// from src/bridge/token-constants.js), with at most SWAP_MAX_INTERMEDIATE_HOPS
+// tokens between the from- and to-token.
 const SWAP_MAX_INTERMEDIATE_HOPS = 3;
-const SWAP_HOP_CANDIDATE_ADDRESSES = [
-  SWAP_WQ_CONTRACT_ADDRESS,
-  ...RECOGNIZED_TOKEN_CONTRACT_ADDRESSES,
-];
+function swapHopCandidateAddresses(release) {
+  return [release.wq, ...RECOGNIZED_TOKEN_CONTRACT_ADDRESSES];
+}
 
 const SWAP_NO_ROUTE_ERROR =
   "No swap route exists between these two tokens: no direct pair and no route through intermediate tokens (max 3 hops).";
@@ -65,8 +82,8 @@ const SWAP_ROUTE_CACHE_TTL_MS = 60000;
 const swapRouteCache = new Map();
 const swapPathSymbolCache = new Map();
 
-function mapSwapTokenValue(value) {
-  return value === "Q" ? SWAP_WQ_CONTRACT_ADDRESS : value;
+function mapSwapTokenValue(value, release) {
+  return value === "Q" ? release.wq : value;
 }
 
 async function factoryPairExists(factory, tokenA, tokenB) {
@@ -86,21 +103,30 @@ async function factoryPairExists(factory, tokenA, tokenB) {
 // exists, otherwise the shortest route (BFS) through the hop candidates, limited
 // to SWAP_MAX_INTERMEDIATE_HOPS intermediate tokens. Returns an array of
 // checksummed addresses ([from, ...hops, to]) or null when no route exists.
-async function findSwapPath(provider, chainId, fromAddrRaw, toAddrRaw) {
+async function findSwapPath(provider, chainId, fromAddrRaw, toAddrRaw, release) {
   const fromAddr = getAddress(fromAddrRaw);
   const toAddr = getAddress(toAddrRaw);
-  const cacheKey = chainId + "|" + fromAddr.toLowerCase() + "|" + toAddr.toLowerCase();
+  // The factory address is part of the key: each release has its own pair set,
+  // so a route cached for one release must never be served for another.
+  const cacheKey =
+    chainId +
+    "|" +
+    release.factory.toLowerCase() +
+    "|" +
+    fromAddr.toLowerCase() +
+    "|" +
+    toAddr.toLowerCase();
   const cached = swapRouteCache.get(cacheKey);
   if (cached && Date.now() - cached.at < SWAP_ROUTE_CACHE_TTL_MS) return cached.path;
 
-  const factory = QuantumSwapV2Factory.connect(SWAP_FACTORY_CONTRACT_ADDRESS, provider);
+  const factory = QuantumSwapV2Factory.connect(release.factory, provider);
   let path = null;
   if (await factoryPairExists(factory, fromAddr, toAddr)) {
     path = [fromAddr, toAddr];
   } else {
     const seen = new Set([fromAddr.toLowerCase(), toAddr.toLowerCase()]);
     const hops = [];
-    for (const h of SWAP_HOP_CANDIDATE_ADDRESSES) {
+    for (const h of swapHopCandidateAddresses(release)) {
       const addr = getAddress(h);
       if (seen.has(addr.toLowerCase())) continue;
       seen.add(addr.toLowerCase());
@@ -159,12 +185,13 @@ async function findSwapPath(provider, chainId, fromAddrRaw, toAddrRaw) {
 
 // Resolve the router path for a swap between two UI token values ("Q" or a
 // contract address). Throws when no route exists so callers surface the error.
-async function resolveSwapPath(provider, chainId, fromTokenValue, toTokenValue) {
+async function resolveSwapPath(provider, chainId, fromTokenValue, toTokenValue, release) {
   const path = await findSwapPath(
     provider,
     chainId,
-    mapSwapTokenValue(fromTokenValue),
-    mapSwapTokenValue(toTokenValue),
+    mapSwapTokenValue(fromTokenValue, release),
+    mapSwapTokenValue(toTokenValue, release),
+    release,
   );
   if (!path) throw new Error(SWAP_NO_ROUTE_ERROR);
   return path;
@@ -428,8 +455,9 @@ async function buildEstimateGasTx(data, provider) {
   }
 
   if (txKind === "approve") {
-    const tokenAddr = data.fromTokenValue === "Q" ? SWAP_WQ_CONTRACT_ADDRESS : data.fromTokenValue;
-    const spenderAddr = SWAP_ROUTER_V2_CONTRACT_ADDRESS;
+    const release = resolveSwapReleaseAddresses(data);
+    const tokenAddr = mapSwapTokenValue(data.fromTokenValue, release);
+    const spenderAddr = release.router;
     const decimals = typeof data.fromDecimals === "number" ? data.fromDecimals : 18;
     const amountWei = parseUnits(normalizeAmountString(data.amount), decimals);
     const token = IERC20.connect(getAddress(tokenAddr), provider);
@@ -438,8 +466,15 @@ async function buildEstimateGasTx(data, provider) {
   }
 
   if (txKind === "swap") {
-    const router = QuantumSwapV2Router02.connect(SWAP_ROUTER_V2_CONTRACT_ADDRESS, provider);
-    const path = await resolveSwapPath(provider, chainId, data.fromTokenValue, data.toTokenValue);
+    const release = resolveSwapReleaseAddresses(data);
+    const router = QuantumSwapV2Router02.connect(release.router, provider);
+    const path = await resolveSwapPath(
+      provider,
+      chainId,
+      data.fromTokenValue,
+      data.toTokenValue,
+      release,
+    );
     const fromDecimals = typeof data.fromDecimals === "number" ? data.fromDecimals : 18;
     const toDecimals = typeof data.toDecimals === "number" ? data.toDecimals : 18;
     const toAddress = data.recipientAddress || data.toAddress;
@@ -486,9 +521,16 @@ export default {
       if (!provider) return { success: false, error: "Invalid RPC endpoint" };
 
       await Initialize(new Config(chainId, initRpcUrlForConfig(data.rpcEndpoint)));
-      const router = QuantumSwapV2Router02.connect(SWAP_ROUTER_V2_CONTRACT_ADDRESS, provider);
+      const release = resolveSwapReleaseAddresses(data);
+      const router = QuantumSwapV2Router02.connect(release.router, provider);
 
-      const path = await resolveSwapPath(provider, chainId, data.fromTokenValue, data.toTokenValue);
+      const path = await resolveSwapPath(
+        provider,
+        chainId,
+        data.fromTokenValue,
+        data.toTokenValue,
+        release,
+      );
 
       const fromDecimals = typeof data.fromDecimals === "number" ? data.fromDecimals : 18;
       const toDecimals = typeof data.toDecimals === "number" ? data.toDecimals : 18;
@@ -519,11 +561,13 @@ export default {
         return { exists: false, path: null, pathSymbols: null, error: "Invalid RPC endpoint" };
 
       await Initialize(new Config(chainId, initRpcUrlForConfig(data.rpcEndpoint)));
+      const release = resolveSwapReleaseAddresses(data);
       const path = await findSwapPath(
         provider,
         chainId,
-        mapSwapTokenValue(data.fromTokenValue),
-        mapSwapTokenValue(data.toTokenValue),
+        mapSwapTokenValue(data.fromTokenValue, release),
+        mapSwapTokenValue(data.toTokenValue, release),
+        release,
       );
       if (!path) return { exists: false, path: null, pathSymbols: null, error: null };
 
@@ -543,9 +587,16 @@ export default {
       if (!provider) return { success: false, error: "Invalid RPC endpoint" };
 
       await Initialize(new Config(chainId, initRpcUrlForConfig(data.rpcEndpoint)));
-      const router = QuantumSwapV2Router02.connect(SWAP_ROUTER_V2_CONTRACT_ADDRESS, provider);
+      const release = resolveSwapReleaseAddresses(data);
+      const router = QuantumSwapV2Router02.connect(release.router, provider);
 
-      const path = await resolveSwapPath(provider, chainId, data.fromTokenValue, data.toTokenValue);
+      const path = await resolveSwapPath(
+        provider,
+        chainId,
+        data.fromTokenValue,
+        data.toTokenValue,
+        release,
+      );
 
       const fromDecimals = typeof data.fromDecimals === "number" ? data.fromDecimals : 18;
       const toDecimals = typeof data.toDecimals === "number" ? data.toDecimals : 18;
@@ -571,9 +622,16 @@ export default {
       if (!provider) return { success: false, gasLimit: null, error: "Invalid RPC endpoint" };
 
       await Initialize(new Config(chainId, initRpcUrlForConfig(data.rpcEndpoint)));
-      const router = QuantumSwapV2Router02.connect(SWAP_ROUTER_V2_CONTRACT_ADDRESS, provider);
+      const release = resolveSwapReleaseAddresses(data);
+      const router = QuantumSwapV2Router02.connect(release.router, provider);
 
-      const path = await resolveSwapPath(provider, chainId, data.fromTokenValue, data.toTokenValue);
+      const path = await resolveSwapPath(
+        provider,
+        chainId,
+        data.fromTokenValue,
+        data.toTokenValue,
+        release,
+      );
       const fromDecimals = typeof data.fromDecimals === "number" ? data.fromDecimals : 18;
       const toDecimals = typeof data.toDecimals === "number" ? data.toDecimals : 18;
       const toAddress = data.recipientAddress || data.toAddress;
@@ -627,8 +685,9 @@ export default {
         return { success: false, sufficient: false, error: "Owner address required" };
 
       await Initialize(new Config(chainId, initRpcUrlForConfig(data.rpcEndpoint)));
-      const tokenAddr = data.fromTokenValue === "Q" ? SWAP_WQ_CONTRACT_ADDRESS : data.fromTokenValue;
-      const spenderAddr = SWAP_ROUTER_V2_CONTRACT_ADDRESS;
+      const release = resolveSwapReleaseAddresses(data);
+      const tokenAddr = mapSwapTokenValue(data.fromTokenValue, release);
+      const spenderAddr = release.router;
       const decimals = typeof data.fromDecimals === "number" ? data.fromDecimals : 18;
       const requiredWei = parseUnits(normalizeAmountString(data.requiredAmount), decimals);
       const token = IERC20.connect(getAddress(tokenAddr), provider);
@@ -666,8 +725,9 @@ export default {
       if (!data.fromAddress) return { success: false, gasLimit: null, error: "From address required" };
 
       await Initialize(new Config(chainId, initRpcUrlForConfig(data.rpcEndpoint)));
-      const tokenAddr = data.fromTokenValue === "Q" ? SWAP_WQ_CONTRACT_ADDRESS : data.fromTokenValue;
-      const spenderAddr = SWAP_ROUTER_V2_CONTRACT_ADDRESS;
+      const release = resolveSwapReleaseAddresses(data);
+      const tokenAddr = mapSwapTokenValue(data.fromTokenValue, release);
+      const spenderAddr = release.router;
       const decimals = typeof data.fromDecimals === "number" ? data.fromDecimals : 18;
       const amountWei = parseUnits(normalizeAmountString(data.amount), decimals);
 
@@ -755,8 +815,13 @@ export default {
     }
   },
 
-  async SwapQuoteGetRouterAddress() {
-    return { success: true, routerAddress: SWAP_ROUTER_V2_CONTRACT_ADDRESS, error: null };
+  async SwapQuoteGetRouterAddress(data) {
+    try {
+      const release = resolveSwapReleaseAddresses(data);
+      return { success: true, routerAddress: release.router, error: null };
+    } catch (err) {
+      return { success: false, routerAddress: null, error: sanitizeSwapError(err) };
+    }
   },
 
   async SwapQuoteGetSwapContractData(data) {
@@ -773,9 +838,16 @@ export default {
         return { success: false, dataHex: null, toAddress: null, valueHex: null, error: "Recipient address required" };
 
       await Initialize(new Config(chainId, initRpcUrlForConfig(data.rpcEndpoint)));
-      const router = QuantumSwapV2Router02.connect(SWAP_ROUTER_V2_CONTRACT_ADDRESS, provider);
+      const release = resolveSwapReleaseAddresses(data);
+      const router = QuantumSwapV2Router02.connect(release.router, provider);
 
-      const path = await resolveSwapPath(provider, chainId, data.fromTokenValue, data.toTokenValue);
+      const path = await resolveSwapPath(
+        provider,
+        chainId,
+        data.fromTokenValue,
+        data.toTokenValue,
+        release,
+      );
       const fromDecimals = typeof data.fromDecimals === "number" ? data.fromDecimals : 18;
       const toDecimals = typeof data.toDecimals === "number" ? data.toDecimals : 18;
       const deadline = await getSwapTxDeadline(provider, 1200);
@@ -808,7 +880,7 @@ export default {
       if (!dataHex)
         return { success: false, dataHex: null, toAddress: null, valueHex: null, error: "No contract data" };
       const valueHex = tx.value != null && tx.value !== 0n ? "0x" + tx.value.toString(16) : "0x0";
-      return { success: true, dataHex, toAddress: SWAP_ROUTER_V2_CONTRACT_ADDRESS, valueHex, error: null };
+      return { success: true, dataHex, toAddress: release.router, valueHex, error: null };
     } catch (err) {
       return { success: false, dataHex: null, toAddress: null, valueHex: null, error: formatSwapRouterRevertError(err) };
     }
@@ -829,14 +901,15 @@ export default {
       const pubBytes = Buffer.from(data.publicKey, "base64");
       const wallet = Wallet.fromKeys(privBytes, pubBytes, provider);
 
-      const tokenAddr = data.fromTokenValue === "Q" ? SWAP_WQ_CONTRACT_ADDRESS : data.fromTokenValue;
+      const release = resolveSwapReleaseAddresses(data);
+      const tokenAddr = mapSwapTokenValue(data.fromTokenValue, release);
       const decimals = typeof data.fromDecimals === "number" ? data.fromDecimals : 18;
       const amountWei = parseUnits(normalizeAmountString(data.amount), decimals);
       const gasLimit = Number(data.gasLimit) || 84000;
 
       const token = IERC20.connect(getAddress(tokenAddr), wallet);
       const tx = await token.approve(
-        getAddress(SWAP_ROUTER_V2_CONTRACT_ADDRESS),
+        getAddress(release.router),
         amountWei,
         signingOverrides(wallet, data, { gasLimit }),
       );
@@ -863,8 +936,15 @@ export default {
       const pubBytes = Buffer.from(data.publicKey, "base64");
       const wallet = Wallet.fromKeys(privBytes, pubBytes, provider);
 
-      const router = QuantumSwapV2Router02.connect(SWAP_ROUTER_V2_CONTRACT_ADDRESS, wallet);
-      const path = await resolveSwapPath(provider, chainId, data.fromTokenValue, data.toTokenValue);
+      const release = resolveSwapReleaseAddresses(data);
+      const router = QuantumSwapV2Router02.connect(release.router, wallet);
+      const path = await resolveSwapPath(
+        provider,
+        chainId,
+        data.fromTokenValue,
+        data.toTokenValue,
+        release,
+      );
       const fromDecimals = typeof data.fromDecimals === "number" ? data.fromDecimals : 18;
       const toDecimals = typeof data.toDecimals === "number" ? data.toDecimals : 18;
       const deadline = await getSwapTxDeadline(provider, 1200);
@@ -917,12 +997,13 @@ export default {
       const pubBytes = Buffer.from(data.publicKey, "base64");
       const wallet = Wallet.fromKeys(privBytes, pubBytes, provider);
 
-      const tokenAddr = data.fromTokenValue === "Q" ? SWAP_WQ_CONTRACT_ADDRESS : data.fromTokenValue;
+      const release = resolveSwapReleaseAddresses(data);
+      const tokenAddr = mapSwapTokenValue(data.fromTokenValue, release);
       const gasLimit = Number(data.gasLimit) || 84000;
 
       const token = IERC20.connect(getAddress(tokenAddr), wallet);
       const tx = await token.approve(
-        getAddress(SWAP_ROUTER_V2_CONTRACT_ADDRESS),
+        getAddress(release.router),
         0n,
         signingOverrides(wallet, data, { gasLimit }),
       );
@@ -947,14 +1028,15 @@ export default {
       const pubBytes = Buffer.from(data.publicKey, "base64");
       const wallet = Wallet.fromKeys(privBytes, pubBytes, provider);
 
-      const tokenAddr = data.fromTokenValue === "Q" ? SWAP_WQ_CONTRACT_ADDRESS : data.fromTokenValue;
+      const release = resolveSwapReleaseAddresses(data);
+      const tokenAddr = mapSwapTokenValue(data.fromTokenValue, release);
       const decimals = typeof data.fromDecimals === "number" ? data.fromDecimals : 18;
       const amountWei = parseUnits(normalizeAmountString(data.amount), decimals);
       const gasLimit = Number(data.gasLimit) || 84000;
 
       const token = IERC20.connect(getAddress(tokenAddr), wallet);
       const tx = await token.approve(
-        getAddress(SWAP_ROUTER_V2_CONTRACT_ADDRESS),
+        getAddress(release.router),
         amountWei,
         signingOverrides(wallet, data, { gasLimit }),
       );
@@ -1203,8 +1285,9 @@ export default {
       if (!provider) return { success: false, dataHex: null, error: "Invalid RPC endpoint" };
 
       await Initialize(new Config(chainId, initRpcUrlForConfig(data.rpcEndpoint)));
-      const tokenAddr = data.fromTokenValue === "Q" ? SWAP_WQ_CONTRACT_ADDRESS : data.fromTokenValue;
-      const spenderAddr = SWAP_ROUTER_V2_CONTRACT_ADDRESS;
+      const release = resolveSwapReleaseAddresses(data);
+      const tokenAddr = mapSwapTokenValue(data.fromTokenValue, release);
+      const spenderAddr = release.router;
       const decimals = typeof data.fromDecimals === "number" ? data.fromDecimals : 18;
       const amountWei = parseUnits(normalizeAmountString(data.amount), decimals);
 
