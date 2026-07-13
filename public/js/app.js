@@ -66,7 +66,6 @@ function getBlockchainNetworkRowTemplate() {
     return blockchainNetworkRowTemplate || "";
 }
 const DROPDOWN_TEXT = "&#x25BC;";
-const DEFAULT_OFFLINE_TXN_SIGNING_SETTING_KEY = "DefaultOfflineTxnSigningSettingKey";
 const DEFAULT_ADVANCED_SIGNING_SETTING_KEY = "DefaultAdvancedSigningSettingKey";
 const maxTokenNameLength = 25;
 const maxTokenSymbolLength = 6;
@@ -99,7 +98,6 @@ let currentWalletRecognizedTokens = [];
 let currentWalletUnrecognizedTokens = [];
 let showingUnrecognizedTokens = false;
 let currentAccountDetails = null;
-let offlineSignEnabled = false;
 
 function checkDuplicateIds() {
     var nodes = document.querySelectorAll('[id]');
@@ -919,12 +917,10 @@ async function showWalletScreen() {
     document.getElementById('settings-content').style.display = 'none';
     document.getElementById('wallets-content').style.display = 'none';
     document.getElementById('SendScreen').style.display = 'none';
-    document.getElementById('OfflineSignScreen').style.display = 'none';
     document.getElementById('SwapScreen').style.display = 'none';
     document.getElementById('ReceiveScreen').style.display = 'none';
     document.getElementById('TransactionsScreen').style.display = 'none';
     document.getElementById('backupWalletScreen').style.display = 'none';
-    document.getElementById('ValidatorScreen').style.display = 'none';
 
     document.getElementById('main-content').style.display = 'block';
     document.getElementById('divMainContent').style.display = 'block';
@@ -1498,7 +1494,6 @@ function showSettingsScreen() {
     document.getElementById('backupSpecificWalletScreen').style.display = "none";
     document.getElementById('networkListScreen').style.display = "none";
     document.getElementById('divNetworkDropdown').style.display = 'none';
-    document.getElementById('ValidatorScreen').style.display = "none";
 
     document.getElementById('settings-content').style.display = "block";
     document.getElementById('settingsScreen').style.display = "block";
@@ -2410,7 +2405,6 @@ function openSwapScreen() {
     document.getElementById('divNetworkDropdown').style.display = 'none';
     document.getElementById('HomeScreen').style.display = 'none';
     document.getElementById('SendScreen').style.display = 'none';
-    document.getElementById('OfflineSignScreen').style.display = 'none';
     document.getElementById('SwapScreen').style.display = 'block';
     document.getElementById('ReceiveScreen').style.display = 'none';
     document.getElementById('TransactionsScreen').style.display = 'none';
@@ -2488,7 +2482,7 @@ var swapApproveGasState = { gasLimit: null, gasFee: null, gasPriceWei: null, ove
 
 // item 5: derive a decimal-wei per-gas-unit price from a displayed fee (coins) and
 // gas limit, for the cases where the node didn't return an exact price (user
-// override / offline / RPC fallback). Returns null when it can't be computed.
+// override / RPC fallback). Returns null when it can't be computed.
 function computeGasPriceWei(gasFeeEth, gasLimit) {
     var fee = parseFloat(gasFeeEth);
     var gl = parseFloat(gasLimit);
@@ -2546,8 +2540,8 @@ function resetCurrentGasConfig(state) {
     s._token = gasEstimateToken;
 }
 
-// Compute the offline/default gas config from a hardcoded gas-limit constant.
-function applyOfflineGasConfig(defaultGasLimit, labelId, state) {
+// Compute the default gas config from a hardcoded gas-limit constant.
+function applyDefaultGasConfig(defaultGasLimit, labelId, state) {
     var s = state || currentGasConfig;
     var gasLimit = defaultGasLimit;
     var gasFee = (gasLimit * SWAP_GAS_FEE_RATE);
@@ -2587,7 +2581,7 @@ function buildEstimateGasPayload(ctx) {
 
 // Schedule a debounced gas estimation. `ctxProvider` returns the tx context (or null to skip),
 // `iconId`/`labelId` identify the UI elements. `state` is the gas-state object to update
-// (defaults to the global currentGasConfig). Respects offline mode (no network lookup).
+// (defaults to the global currentGasConfig).
 // `onRpcError` (optional) is invoked once if the network gas-price lookup fails (RPC error).
 function scheduleGasEstimation(ctxProvider, iconId, labelId, state, onRpcError) {
     var s = state || currentGasConfig;
@@ -2614,17 +2608,6 @@ async function runGasEstimation(ctxProvider, iconId, labelId, state, onRpcError)
         s.gasLimit = null;
         s.gasFee = null;
         s.overridden = false;
-        return;
-    }
-
-    var offline = await offlineTxnSigningGetDefaultValue();
-    if (offline === true) {
-        // Offline: no network lookup. Use the hardcoded default for this tx kind.
-        if (ctx.defaultGasLimit) {
-            applyOfflineGasConfig(ctx.defaultGasLimit, labelId, state);
-        } else {
-            setGasIconPulse(iconId, false);
-        }
         return;
     }
 
@@ -2722,7 +2705,7 @@ async function runGasEstimation(ctxProvider, iconId, labelId, state, onRpcError)
 }
 
 // Open the Gas config dialog prefilled with the current values; on OK, override.
-// `ctxProvider` (optional) is used to gate the offline-default pre-apply: the default
+// `ctxProvider` (optional) is used to gate the default pre-apply: the default
 // fee is only applied when the tx context is valid (inputs present), so no fee is
 // shown before the required quantity/inputs have been entered.
 function onGasIconClick(labelId, state, ctxProvider) {
@@ -2730,7 +2713,7 @@ function onGasIconClick(labelId, state, ctxProvider) {
     if (s.gasLimit == null && typeof ctxProvider === "function") {
         var ctx = ctxProvider();
         if (ctx && ctx.txKind && ctx.defaultGasLimit) {
-            applyOfflineGasConfig(ctx.defaultGasLimit, labelId, state);
+            applyDefaultGasConfig(ctx.defaultGasLimit, labelId, state);
         }
     }
     showGasConfigDialog({
@@ -2775,7 +2758,7 @@ function resolveGasForTx(defaultGasLimit, state) {
     };
 }
 
-// Swap gas defaults (offline / network-failure fallbacks).
+// Swap gas defaults (network-failure fallbacks).
 var SWAP_DEFAULT_GAS = 200000;
 var APPROVE_DEFAULT_GAS = 84000;
 
@@ -3317,17 +3300,6 @@ function showSwapApprovalTransactionReview(review, mode) {
     showTransactionReviewDialog(review);
 }
 
-function showValidatorTransactionReview(review, onConfirm) {
-    review.requirePassword = false;
-    review.assetLabelKey = "action";
-    review.submitLabelKey = "submit";
-    review.fromAddress = currentWalletAddress;
-    review.networkText = txReviewNetworkText();
-    review.contractAddress = (typeof STAKING_CONTRACT_ADDRESS !== "undefined") ? STAKING_CONTRACT_ADDRESS : "";
-    review.onSubmit = onConfirm;
-    showTransactionReviewDialog(review);
-}
-
 function showSwapExecuteConfirmDialog() {
     var fromValue = document.getElementById("ddlSwapFromToken").value;
     var toValue = document.getElementById("ddlSwapToToken").value;
@@ -3660,44 +3632,6 @@ async function openBlockExplorer() {
 function clickOnEnter(event, object) {
     if (event.keyCode == 13) {
         object.click();
-    }
-}
-
-async function offlineTxnSigningSetDefaultValue(value) {
-    let itemStoreResult = await storageSetItem(DEFAULT_OFFLINE_TXN_SIGNING_SETTING_KEY, value);
-    if (itemStoreResult != true) {
-        throw new Error("offlineTxnSigningSetDefaultValue item store failed");
-    }
-
-    return true;
-}
-
-async function offlineTxnSigningGetDefaultValue() {
-    let value = await storageGetItem(DEFAULT_OFFLINE_TXN_SIGNING_SETTING_KEY);
-    if (value == null) {
-        return false;
-    }
-
-    if (value === "enabled") {
-        return true;
-    }
-
-    return false;
-}
-
-async function saveSelectedOfflineTxnSigningSetting() {
-    const radioButtons = document.querySelectorAll('input[name="optOfflineTxnSigning"]');
-    let selectedValue = "";
-    radioButtons.forEach(function (radioButton) {
-        if (radioButton.checked) {
-            selectedValue = radioButton.value;
-        }
-    });
-    let result = await offlineTxnSigningSetDefaultValue(selectedValue);
-    if (result == false) {
-        showWarnAlert(getGenericError(""));
-    } else {
-        return;
     }
 }
 

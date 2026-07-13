@@ -9,12 +9,8 @@ function getSendTxContext() {
     let toAddress = (document.getElementById("txtSendAddress").value || "").trim();
     let amount = (document.getElementById("txtSendQuantity").value || "").trim();
     let isCoin = (selectedValue === "Q");
-    // The dropdown option value is the token contract address for recognized tokens;
-    // "other" is the offline manual-entry case where the address is in txtTokenContractAddress.
-    // (txtTokenContractAddress is not populated in online mode, so don't rely on it here.)
-    let contractAddress = isCoin
-        ? null
-        : (selectedValue === "other" ? document.getElementById("txtTokenContractAddress").value : selectedValue);
+    // The dropdown option value is the token contract address for recognized tokens.
+    let contractAddress = isCoin ? null : selectedValue;
     var ctx = {
         txKind: isCoin ? "sendCoin" : "sendToken",
         toAddress: toAddress || currentWalletAddress,
@@ -52,12 +48,6 @@ function resetTokenList() {
     option.text = "Q";
     option.value = "Q";
     ddlCoinTokenToSend.add(option);
-    if (offlineSignEnabled === true) {
-        var optOther = document.createElement("option");
-        optOther.text = "(token)";
-        optOther.value = "other";
-        ddlCoinTokenToSend.add(optOther);
-    }
 }
 
 function addTokenOptionToSendDropdown(ddlCoinTokenToSend, token) {
@@ -133,7 +123,6 @@ function syncSendScreenTokenList() {
 
     let ddlCoinTokenToSend = document.getElementById("ddlCoinTokenToSend");
     let previousValue = ddlCoinTokenToSend.value;
-    let previousContractInput = document.getElementById("txtTokenContractAddress").value;
 
     populateSendScreen();
 
@@ -145,12 +134,6 @@ function syncSendScreenTokenList() {
     }
 
     updateInfoSendScreen();
-
-    //Preserve a manually-typed token contract (offline "(token)" entry) that
-    //updateInfoSendScreen clears when re-selecting the manual option.
-    if (previousValue === "other") {
-        document.getElementById("txtTokenContractAddress").value = previousContractInput;
-    }
 }
 
 async function updateInfoSendScreen() {
@@ -163,42 +146,20 @@ async function updateInfoSendScreen() {
     document.getElementById("divCoinTokenToSend").textContent = "";
     document.getElementById("divCoinTokenToSend").style.display = "";
     document.getElementById("divBalanceSendScreen").textContent = "";
-    document.getElementById("txtTokenContractAddress").style.display = "none";
-    if(offlineSignEnabled == true) {
-        document.getElementById("divSendScreenBalanceBox").style.display = "none";
-    } else {
-        document.getElementById("divSendScreenBalanceBox").style.display = "false";
-    }
+    document.getElementById("divSendScreenBalanceBox").style.display = "";
 
     if(selectedValue === "Q") {
         document.getElementById("divCoinTokenToSend").textContent = QuantumCoin;
-        if(offlineSignEnabled === false) {
-            if (currentAccountDetails !== null) {
-                let newBalance = await weiToEtherFormatted(currentAccountDetails.balance);
-                document.getElementById("divBalanceSendScreen").textContent = newBalance;
-            }
+        if (currentAccountDetails !== null) {
+            let newBalance = await weiToEtherFormatted(currentAccountDetails.balance);
+            document.getElementById("divBalanceSendScreen").textContent = newBalance;
         }
     } else {
-        if(offlineSignEnabled === true) {
-            let txtContract = document.getElementById("txtTokenContractAddress");
-            document.getElementById("divCoinTokenToSend").style.display = "none";
-            txtContract.style.display = "";
-            if (selectedValue === "other") {
-                //Manual entry: let the user type the contract address.
-                txtContract.value = "";
-                txtContract.readOnly = false;
-            } else {
-                //A real token was picked from the list; use its contract address.
-                txtContract.value = selectedValue;
-                txtContract.readOnly = true;
-            }
-        } else {
-            for (let i = 0; i < currentWalletTokenList.length; i++) {
-                if (currentWalletTokenList[i].contractAddress === selectedValue) {
-                    document.getElementById("divBalanceSendScreen").textContent = currentWalletTokenList[i].tokenBalance;
-                    document.getElementById("divCoinTokenToSend").textContent = selectedValue;
-                    break;
-                }
+        for (let i = 0; i < currentWalletTokenList.length; i++) {
+            if (currentWalletTokenList[i].contractAddress === selectedValue) {
+                document.getElementById("divBalanceSendScreen").textContent = currentWalletTokenList[i].tokenBalance;
+                document.getElementById("divCoinTokenToSend").textContent = selectedValue;
+                break;
             }
         }
     }
@@ -210,34 +171,20 @@ async function updateInfoSendScreen() {
 }
 
 async function showSendScreen() {
-    offlineSignEnabled = await offlineTxnSigningGetDefaultValue();
     sendShowUnrecognizedTokens = false;
     document.getElementById("chkSendShowUnrecognized").checked = false;
-    document.getElementById("txtTokenContractAddress").readOnly = false;
     let ddlCoinTokenToSend = document.getElementById("ddlCoinTokenToSend");
     ddlCoinTokenToSend.disabled = true;
     populateSendScreen();
     await updateInfoSendScreen();
     ddlCoinTokenToSend.disabled = false;
 
-    if (offlineSignEnabled === true) {
-        document.getElementById("btnOfflineSign").style.display  = "block";
-        document.getElementById("divCurrentNonce").style.display  = "block";
-        document.getElementById("btnSendCoins").style.display  = "none";
-    } else {
-        document.getElementById("btnOfflineSign").style.display  = "none";
-        document.getElementById("divCurrentNonce").style.display  = "none";
-        document.getElementById("btnSendCoins").style.display  = "block";
-    }
-
     document.getElementById('divNetworkDropdown').style.display = 'none';
     document.getElementById('HomeScreen').style.display = 'none';
     document.getElementById('SendScreen').style.display = 'block';
-    document.getElementById('OfflineSignScreen').style.display = 'none';
     document.getElementById('gradient').style.height = '116px';
     document.getElementById("txtSendAddress").value = "";
     document.getElementById("txtSendQuantity").value = "";
-    document.getElementById("txtCurrentNonce").value = "";
     document.getElementById("pwdSend").value = "";
     document.getElementById("txtSendAddress").focus();
 
@@ -254,196 +201,6 @@ function attachSendGasListeners() {
     var qty = document.getElementById("txtSendQuantity");
     if (addr && !addr.dataset.gasBound) { addr.addEventListener("input", scheduleSendGasEstimation); addr.dataset.gasBound = "1"; }
     if (qty && !qty.dataset.gasBound) { qty.addEventListener("input", scheduleSendGasEstimation); qty.dataset.gasBound = "1"; }
-}
-
-async function signOfflineSend() {
-    var sendAddress = document.getElementById("txtSendAddress").value;
-    var sendQuantity = document.getElementById("txtSendQuantity").value;
-    var currentNonce = document.getElementById("txtCurrentNonce").value;
-    var sendPassword = document.getElementById("pwdSend").value;
-    let ddlCoinTokenToSend = document.getElementById("ddlCoinTokenToSend");
-    let selectedValue = ddlCoinTokenToSend.value;
-    let CoinTokenToSendName = "";
-    if(selectedValue === "Q") {
-        CoinTokenToSendName = "coins";
-    } else {
-        let contractAddress = document.getElementById("txtTokenContractAddress").value;
-        if (contractAddress == null || contractAddress.length < ADDRESS_LENGTH_CHECK || await isValidQcAddress(contractAddress) == false) {
-            showWarnAlert(langJson.errors.quantumAddr);
-            return false;
-        }
-        CoinTokenToSendName = "tokens";
-    }
-
-    if (sendAddress == null || sendAddress.length < ADDRESS_LENGTH_CHECK || await isValidQcAddress(sendAddress) == false) {
-        showWarnAlert(langJson.errors.quantumAddr);
-        return false;
-    }
-
-    if (sendQuantity == null || sendQuantity.length < 1) {
-        showWarnAlert(langJson.errors.enterAmount);
-        return false;
-    }
-
-    let okQuantity = await isValidEther(sendQuantity);
-    if (isValidEther(okQuantity) == false) {
-        showWarnAlert(langJson.errors.enterAmount);
-        return false;
-    }
-
-    if (currentNonce == null || currentNonce.length < 1) {
-        showWarnAlert(langJson.errors.enterCurrentNonce);
-        return false;
-    }
-
-    let tempNonce = parseInt(currentNonce);
-    if (Number.isInteger(tempNonce) == false || tempNonce < 0) {
-        showWarnAlert(langJson.errors.enterCurrentNonce);
-        return false;
-    }
-
-    if (sendPassword == null || sendPassword.length < 2) {
-        showWarnAlert(langJson.errors.enterQuantumPassword);
-        return false;
-    }
-
-    var isCoin = (selectedValue === "Q");
-    var offlineContractAddress = isCoin ? null : document.getElementById("txtTokenContractAddress").value;
-    var resolved = resolveGasForTx(isCoin ? COIN_SEND_GAS : TOKEN_SEND_GAS);
-    var gasLimit = parseInt(resolved.gasLimit, 10);
-    var gasFee = resolved.gasFee;
-
-    var review = {
-        asset: getSendAssetSymbol(offlineContractAddress, isCoin),
-        contractAddress: offlineContractAddress,
-        fromAddress: currentWalletAddress,
-        toAddress: sendAddress,
-        quantityLabelKey: "send-quantity",
-        quantityValue: sendQuantity,
-        gasLimit: String(gasLimit),
-        gasFee: gasFee,
-        nonce: String(tempNonce),
-        networkText: txReviewNetworkText(),
-        requirePassword: false,
-        submitLabelKey: "ok",
-        onSubmit: onSignOfflineSendCoinsConfirm
-    };
-    showTransactionReviewDialog(review);
-}
-
-async function onSignOfflineSendCoinsConfirm() {
-    showLoadingAndExecuteAsync(langJson.langValues.waitWalletOpen, decryptAndUnlockWalletSignOffline);
-}
-
-async function decryptAndUnlockWalletSignOffline() {
-    var password = document.getElementById("pwdSend").value;
-    try {
-        let quantumWallet = await walletGetByAddress(password, currentWalletAddress);
-        if (quantumWallet == null) {
-            hideWaitingBox();
-            showWarnAlert(getGenericError());
-            return;
-        }
-        signOfflineTxnSend(quantumWallet);
-    }
-    catch (error) {
-        hideWaitingBox();
-        showWarnAlert(langJson.errors.walletOpenError.replace(STORAGE_PATH_TEMPLATE, STORAGE_PATH) + " " + error)
-        return;
-    }
-    return false;
-}
-
-async function signOfflineTxnSendToken(quantumWallet) {
-    var sendAddress = document.getElementById("txtSendAddress").value;
-    var sendQuantity = document.getElementById("txtSendQuantity").value;
-    var currentNonce = document.getElementById("txtCurrentNonce").value;
-    var contractAddress = document.getElementById("txtTokenContractAddress").value;
-
-    try {
-        var resolvedOffTok = resolveGasForTx(TOKEN_SEND_GAS);
-        var result = await offlineSignTokenTransaction({
-            chainId: parseInt(currentBlockchainNetwork.networkId, 10),
-            toAddress: sendAddress,
-            amount: sendQuantity,
-            contractAddress: contractAddress,
-            fromDecimals: getSwapTokenDecimals(contractAddress),
-            nonce: parseInt(currentNonce),
-            gasLimit: parseInt(resolvedOffTok.gasLimit, 10),
-            gasPriceWei: resolvedOffTok.gasPriceWei,
-            privateKey: await quantumWallet.getPrivateKey(),
-            publicKey: await quantumWallet.getPublicKey(),
-            advancedSigningEnabled: await advancedSigningGetDefaultValue()
-        });
-
-        if (!result || !result.success || !result.txData) {
-            hideWaitingBox();
-            showWarnAlert((result && result.error) ? String(result.error) : (langJson.errors.unexpectedError));
-            return;
-        }
-
-        hideWaitingBox();
-        document.getElementById('txtSignedSendTransaction').value = result.txData;
-        document.getElementById('SendScreen').style.display = "none";
-        document.getElementById('OfflineSignScreen').style.display = "block";
-    }
-    catch (error) {
-        hideWaitingBox();
-        showWarnAlert(langJson.errors.walletOpenError.replace(STORAGE_PATH_TEMPLATE, STORAGE_PATH) + " " + error)
-    }
-}
-
-async function signOfflineTxnSend(quantumWallet) {
-    let ddlCoinTokenToSend = document.getElementById("ddlCoinTokenToSend");
-    let selectedValue = ddlCoinTokenToSend.value;
-    if(selectedValue === "Q") {
-
-    } else {
-        await signOfflineTxnSendToken(quantumWallet);
-        return;
-    }
-    var sendAddress = document.getElementById("txtSendAddress").value;
-    var sendQuantity = document.getElementById("txtSendQuantity").value;
-    var currentNonce = document.getElementById("txtCurrentNonce").value;
-
-    try {
-        var resolvedOffCoin = resolveGasForTx(COIN_SEND_GAS);
-        var result = await offlineSignCoinTransaction({
-            chainId: parseInt(currentBlockchainNetwork.networkId, 10),
-            toAddress: sendAddress,
-            amount: sendQuantity,
-            nonce: parseInt(currentNonce),
-            gasLimit: parseInt(resolvedOffCoin.gasLimit, 10),
-            gasPriceWei: resolvedOffCoin.gasPriceWei,
-            privateKey: await quantumWallet.getPrivateKey(),
-            publicKey: await quantumWallet.getPublicKey(),
-            advancedSigningEnabled: await advancedSigningGetDefaultValue()
-        });
-
-        if (!result || !result.success || !result.txData) {
-            hideWaitingBox();
-            showWarnAlert((result && result.error) ? String(result.error) : (langJson.errors.unexpectedError));
-            return;
-        }
-
-        hideWaitingBox();
-        document.getElementById('txtSignedSendTransaction').value = result.txData;
-        document.getElementById('SendScreen').style.display = "none";
-        document.getElementById('OfflineSignScreen').style.display = "block";
-    }
-    catch (error) {
-        hideWaitingBox();
-        showWarnAlert(langJson.errors.walletOpenError.replace(STORAGE_PATH_TEMPLATE, STORAGE_PATH) + " " + error)
-    }
-}
-
-async function copySignedSendTransaction() {
-    await WriteTextToClipboard(document.getElementById('txtSignedSendTransaction').value);
-}
-
-async function openOfflineTxnSigningUrl() {
-    await OpenUrl("https://QuantumCoin.org/offline-transaction-signing.html");
-    return false;
 }
 
 async function sendCoins() {

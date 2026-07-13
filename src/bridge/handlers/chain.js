@@ -1,12 +1,10 @@
-// Ported from the swap/send/staking/offline-signing ipcMain.handle handlers in the
-// desktop src/index.js. Logic (contract addresses, slippage/deadline math, gas
-// estimation, staking ABI) is preserved verbatim. The only removals are the
-// Windows named-pipe / unix-socket ("IPC") RPC code paths, which cannot exist in a
-// browser: RPC endpoints are HTTP(S) only here.
+// Ported from the swap/send ipcMain.handle handlers in the desktop src/index.js.
+// Logic (contract addresses, slippage/deadline math, gas estimation) is preserved
+// verbatim. The only removals are the Windows named-pipe / unix-socket ("IPC") RPC
+// code paths, which cannot exist in a browser: RPC endpoints are HTTP(S) only here.
 import { Initialize, Config } from "quantumcoin/config";
 import {
   Wallet,
-  Contract,
   Interface,
   parseUnits,
   formatUnits,
@@ -247,32 +245,6 @@ function applyGasBuffer(gasLimitBi, percent) {
   return (base * (100n + BigInt(pct))) / 100n;
 }
 
-const STAKING_CONTRACT_ADDRESS =
-  "0x0000000000000000000000000000000000000000000000000000000000001000";
-const STAKING_ABI_JSON = [{"anonymous":false,"inputs":[{"indexed":true,"internalType":"address","name":"depositorAddress","type":"address"},{"indexed":true,"internalType":"address","name":"oldValidatorAddress","type":"address"},{"indexed":true,"internalType":"address","name":"newValidatorAddress","type":"address"}],"name":"OnChangeValidator","type":"event"},{"anonymous":false,"inputs":[{"indexed":true,"internalType":"address","name":"depositorAddress","type":"address"},{"indexed":false,"internalType":"uint256","name":"withdrawalQuantity","type":"uint256"}],"name":"OnCompletePartialWithdrawal","type":"event"},{"anonymous":false,"inputs":[{"indexed":false,"internalType":"address","name":"depositorAddress","type":"address"},{"indexed":false,"internalType":"uint256","name":"netBalance","type":"uint256"}],"name":"OnCompleteWithdrawal","type":"event"},{"anonymous":false,"inputs":[{"indexed":true,"internalType":"address","name":"depositorAddress","type":"address"},{"indexed":false,"internalType":"uint256","name":"oldBalance","type":"uint256"},{"indexed":false,"internalType":"uint256","name":"newBalance","type":"uint256"}],"name":"OnIncreaseDeposit","type":"event"},{"anonymous":false,"inputs":[{"indexed":true,"internalType":"address","name":"depositorAddress","type":"address"},{"indexed":false,"internalType":"uint256","name":"withdrawalBlock","type":"uint256"},{"indexed":false,"internalType":"uint256","name":"withdrawalQuantity","type":"uint256"}],"name":"OnInitiatePartialWithdrawal","type":"event"},{"anonymous":false,"inputs":[{"indexed":true,"internalType":"address","name":"depositorAddress","type":"address"},{"indexed":true,"internalType":"address","name":"validatorAddress","type":"address"},{"indexed":false,"internalType":"uint256","name":"amount","type":"uint256"},{"indexed":false,"internalType":"uint256","name":"blockNumber","type":"uint256"},{"indexed":false,"internalType":"uint256","name":"blockTime","type":"uint256"}],"name":"OnNewDeposit","type":"event"},{"anonymous":false,"inputs":[{"indexed":false,"internalType":"address","name":"depositorAddress","type":"address"},{"indexed":false,"internalType":"address","name":"validatorAddress","type":"address"}],"name":"OnPauseValidation","type":"event"},{"anonymous":false,"inputs":[{"indexed":false,"internalType":"address","name":"depositorAddress","type":"address"},{"indexed":false,"internalType":"address","name":"validatorAddress","type":"address"}],"name":"OnResumeValidation","type":"event"},{"anonymous":false,"inputs":[{"indexed":true,"internalType":"address","name":"depositorAddress","type":"address"},{"indexed":false,"internalType":"uint256","name":"rewardAmount","type":"uint256"}],"name":"OnReward","type":"event"},{"anonymous":false,"inputs":[{"indexed":true,"internalType":"address","name":"depositorAddress","type":"address"},{"indexed":false,"internalType":"uint256","name":"slashedAmount","type":"uint256"}],"name":"OnSlashing","type":"event"},{"inputs":[{"internalType":"address","name":"depositorAddress","type":"address"},{"internalType":"uint256","name":"rewardAmount","type":"uint256"}],"name":"addDepositorReward","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"address","name":"depositorAddress","type":"address"},{"internalType":"uint256","name":"slashAmount","type":"uint256"}],"name":"addDepositorSlashing","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"address","name":"newValidatorAddress","type":"address"}],"name":"changeValidator","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[],"name":"completePartialWithdrawal","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"nonpayable","type":"function"},{"inputs":[],"name":"completeWithdrawal","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"address","name":"depositorAddress","type":"address"}],"name":"didDepositorEverExist","outputs":[{"internalType":"bool","name":"","type":"bool"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"address","name":"validatorAddress","type":"address"}],"name":"didValidatorEverExist","outputs":[{"internalType":"bool","name":"","type":"bool"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"address","name":"depositorAddress","type":"address"}],"name":"doesDepositorExist","outputs":[{"internalType":"bool","name":"","type":"bool"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"address","name":"validatorAddress","type":"address"}],"name":"doesValidatorExist","outputs":[{"internalType":"bool","name":"","type":"bool"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"address","name":"depositorAddress","type":"address"}],"name":"getBalanceOfDepositor","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"},{"inputs":[],"name":"getDepositorCount","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"address","name":"validatorAddress","type":"address"}],"name":"getDepositorOfValidator","outputs":[{"internalType":"address","name":"","type":"address"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"address","name":"depositorAddress","type":"address"}],"name":"getDepositorRewards","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"address","name":"depositorAddress","type":"address"}],"name":"getDepositorSlashings","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"address","name":"depositorAddress","type":"address"}],"name":"getNetBalanceOfDepositor","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"address","name":"validatorAddress","type":"address"}],"name":"getStakingDetails","outputs":[{"components":[{"internalType":"address","name":"Depositor","type":"address"},{"internalType":"address","name":"Validator","type":"address"},{"internalType":"uint256","name":"Balance","type":"uint256"},{"internalType":"uint256","name":"NetBalance","type":"uint256"},{"internalType":"uint256","name":"BlockRewards","type":"uint256"},{"internalType":"uint256","name":"Slashings","type":"uint256"},{"internalType":"bool","name":"IsValidationPaused","type":"bool"},{"internalType":"uint256","name":"WithdrawalBlock","type":"uint256"},{"internalType":"uint256","name":"WithdrawalAmount","type":"uint256"},{"internalType":"uint256","name":"LastNilBlockNumber","type":"uint256"},{"internalType":"uint256","name":"NilBlockCount","type":"uint256"}],"internalType":"struct IStakingContract.StakingDetails","name":"","type":"tuple"}],"stateMutability":"view","type":"function"},{"inputs":[],"name":"getTotalDepositedBalance","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"address","name":"depositorAddress","type":"address"}],"name":"getValidatorOfDepositor","outputs":[{"internalType":"address","name":"","type":"address"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"address","name":"depositorAddress","type":"address"}],"name":"getWithdrawalBlock","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"},{"inputs":[],"name":"increaseDeposit","outputs":[],"stateMutability":"payable","type":"function"},{"inputs":[{"internalType":"uint256","name":"amount","type":"uint256"}],"name":"initiatePartialWithdrawal","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"address","name":"validatorAddress","type":"address"}],"name":"isValidationPaused","outputs":[{"internalType":"bool","name":"","type":"bool"}],"stateMutability":"view","type":"function"},{"inputs":[],"name":"listValidators","outputs":[{"internalType":"address[]","name":"","type":"address[]"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"address","name":"validatorAddress","type":"address"}],"name":"newDeposit","outputs":[],"stateMutability":"payable","type":"function"},{"inputs":[],"name":"pauseValidation","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"address","name":"validatorAddress","type":"address"}],"name":"resetNilBlock","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[],"name":"resumeValidation","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"address","name":"validatorAddress","type":"address"}],"name":"setNilBlock","outputs":[],"stateMutability":"nonpayable","type":"function"}];
-
-const STAKING_ALLOWED_METHODS = [
-  "newDeposit",
-  "increaseDeposit",
-  "initiatePartialWithdrawal",
-  "completePartialWithdrawal",
-  "pauseValidation",
-  "resumeValidation",
-];
-
-function prepareStakingMethodArgs(abi, method, rawArgs) {
-  const fn = abi.find((f) => f.type === "function" && f.name === method);
-  if (!fn || !fn.inputs) return rawArgs || [];
-  const args = rawArgs || [];
-  return fn.inputs.map((input, i) => {
-    const val = args[i];
-    if (val == null) return val;
-    if (input.type === "address") return getAddress(val);
-    if (input.type === "uint256") return parseUnits(normalizeAmountString(String(val)), 18);
-    return val;
-  });
-}
-
 // Build the unsigned tx request (with `from`) for a given transaction kind, for estimateGas.
 async function buildEstimateGasTx(data, provider) {
   const chainId = Number(data.chainId);
@@ -354,18 +326,6 @@ async function buildEstimateGasTx(data, provider) {
     // recipient. `toAddress` is only the funds recipient and may differ from the
     // signer; using it as `from` estimates against the wrong account's state.
     return { ...tx, from: getAddress(fromAddress || toAddress) };
-  }
-
-  // Staking contract methods
-  if (STAKING_ALLOWED_METHODS && STAKING_ALLOWED_METHODS.includes(txKind)) {
-    const contract = new Contract(STAKING_CONTRACT_ADDRESS, STAKING_ABI_JSON, provider);
-    const methodArgs = prepareStakingMethodArgs(STAKING_ABI_JSON, txKind, data.methodArgs || []);
-    const tx = await contract.populateTransaction[txKind](...methodArgs);
-    const out = { ...tx, from: getAddress(fromAddress) };
-    if (data.value && data.value !== "0" && data.value !== "0.0") {
-      out.value = parseUnits(normalizeAmountString(data.value), 18);
-    }
-    return out;
   }
 
   throw new Error("Unsupported txKind for estimateGas: " + txKind);
@@ -870,151 +830,6 @@ export default {
       return { success: true, txHash: tx.hash, error: null };
     } catch (err) {
       return { success: false, txHash: null, error: sanitizeSwapError(err) };
-    }
-  },
-
-  async OfflineSignCoinTransaction(data) {
-    try {
-      if (!data.privateKey || !data.publicKey)
-        return { success: false, txData: null, error: "Wallet keys required" };
-      if (!data.toAddress) return { success: false, txData: null, error: "Recipient address required" };
-      const chainId = Number(data.chainId);
-      if (!Number.isInteger(chainId)) return { success: false, txData: null, error: "Invalid chain ID" };
-      const nonce = Number(data.nonce);
-      if (!Number.isInteger(nonce) || nonce < 0)
-        return { success: false, txData: null, error: "Invalid nonce" };
-
-      await Initialize(null);
-      const privBytes = Buffer.from(data.privateKey, "base64");
-      const pubBytes = Buffer.from(data.publicKey, "base64");
-      const wallet = Wallet.fromKeys(privBytes, pubBytes);
-
-      const valueWei = parseUnits(normalizeAmountString(data.amount), 18);
-      const gasLimit = Number(data.gasLimit) || 21000;
-
-      const txData = await wallet.signTransaction(
-        signingOverrides(wallet, data, {
-          to: getAddress(data.toAddress),
-          value: valueWei,
-          nonce: nonce,
-          chainId: chainId,
-          gasLimit: gasLimit,
-        }),
-      );
-      return { success: true, txData: txData, error: null };
-    } catch (err) {
-      return { success: false, txData: null, error: err && err.message ? err.message : String(err) };
-    }
-  },
-
-  async OfflineSignTokenTransaction(data) {
-    try {
-      if (!data.privateKey || !data.publicKey)
-        return { success: false, txData: null, error: "Wallet keys required" };
-      if (!data.toAddress) return { success: false, txData: null, error: "Recipient address required" };
-      if (!data.contractAddress)
-        return { success: false, txData: null, error: "Token contract address required" };
-      const chainId = Number(data.chainId);
-      if (!Number.isInteger(chainId)) return { success: false, txData: null, error: "Invalid chain ID" };
-      const nonce = Number(data.nonce);
-      if (!Number.isInteger(nonce) || nonce < 0)
-        return { success: false, txData: null, error: "Invalid nonce" };
-
-      await Initialize(null);
-      const privBytes = Buffer.from(data.privateKey, "base64");
-      const pubBytes = Buffer.from(data.publicKey, "base64");
-      const wallet = Wallet.fromKeys(privBytes, pubBytes);
-
-      const decimals = typeof data.fromDecimals === "number" ? data.fromDecimals : 18;
-      const amountWei = parseUnits(normalizeAmountString(data.amount), decimals);
-      const gasLimit = Number(data.gasLimit) || 84000;
-
-      const token = IERC20.connect(getAddress(data.contractAddress), wallet);
-      const txReq = await token.populateTransaction.transfer(
-        getAddress(data.toAddress),
-        amountWei,
-        signingOverrides(wallet, data, { gasLimit }),
-      );
-
-      const txData = await wallet.signTransaction(
-        signingOverrides(wallet, data, {
-          ...txReq,
-          nonce: nonce,
-          chainId: chainId,
-        }),
-      );
-      return { success: true, txData: txData, error: null };
-    } catch (err) {
-      return { success: false, txData: null, error: err && err.message ? err.message : String(err) };
-    }
-  },
-
-  async StakingContractSubmit(data) {
-    try {
-      if (!data.method || !STAKING_ALLOWED_METHODS.includes(data.method))
-        return { success: false, txHash: null, error: "Invalid staking method" };
-      if (!data.privateKey || !data.publicKey)
-        return { success: false, txHash: null, error: "Wallet keys required" };
-      const chainId = Number(data.chainId);
-      if (!Number.isInteger(chainId)) return { success: false, txHash: null, error: "Invalid chain ID" };
-
-      const provider = createQuantumRpcProvider(data.rpcEndpoint, chainId);
-      if (!provider) return { success: false, txHash: null, error: "Invalid RPC endpoint" };
-
-      await Initialize(new Config(chainId, initRpcUrlForConfig(data.rpcEndpoint)));
-      const privBytes = Buffer.from(data.privateKey, "base64");
-      const pubBytes = Buffer.from(data.publicKey, "base64");
-      const wallet = Wallet.fromKeys(privBytes, pubBytes, provider);
-
-      const contract = new Contract(STAKING_CONTRACT_ADDRESS, STAKING_ABI_JSON, wallet);
-      const methodArgs = prepareStakingMethodArgs(STAKING_ABI_JSON, data.method, data.methodArgs);
-      const gasLimit = Number(data.gasLimit) || 250000;
-      const overrides = signingOverrides(wallet, data, { gasLimit });
-      if (data.value && data.value !== "0" && data.value !== "0.0") {
-        overrides.value = parseUnits(normalizeAmountString(data.value), 18);
-      }
-      methodArgs.push(overrides);
-
-      const tx = await contract[data.method](...methodArgs);
-      return { success: true, txHash: tx.hash, error: null };
-    } catch (err) {
-      return { success: false, txHash: null, error: err && err.message ? err.message : String(err) };
-    }
-  },
-
-  async StakingContractOfflineSign(data) {
-    try {
-      if (!data.method || !STAKING_ALLOWED_METHODS.includes(data.method))
-        return { success: false, txData: null, error: "Invalid staking method" };
-      if (!data.privateKey || !data.publicKey)
-        return { success: false, txData: null, error: "Wallet keys required" };
-      const chainId = Number(data.chainId);
-      if (!Number.isInteger(chainId)) return { success: false, txData: null, error: "Invalid chain ID" };
-      const nonce = Number(data.nonce);
-      if (!Number.isInteger(nonce) || nonce < 0)
-        return { success: false, txData: null, error: "Invalid nonce" };
-
-      await Initialize(null);
-      const privBytes = Buffer.from(data.privateKey, "base64");
-      const pubBytes = Buffer.from(data.publicKey, "base64");
-      const wallet = Wallet.fromKeys(privBytes, pubBytes);
-
-      const contract = new Contract(STAKING_CONTRACT_ADDRESS, STAKING_ABI_JSON, wallet);
-      const methodArgs = prepareStakingMethodArgs(STAKING_ABI_JSON, data.method, data.methodArgs);
-      const gasLimit = Number(data.gasLimit) || 250000;
-      const overrides = signingOverrides(wallet, data, { gasLimit });
-      if (data.value && data.value !== "0" && data.value !== "0.0") {
-        overrides.value = parseUnits(normalizeAmountString(data.value), 18);
-      }
-      methodArgs.push(overrides);
-
-      const txReq = await contract.populateTransaction[data.method](...methodArgs);
-      const txData = await wallet.signTransaction(
-        signingOverrides(wallet, data, { ...txReq, nonce: nonce, chainId: chainId }),
-      );
-      return { success: true, txData: txData, error: null };
-    } catch (err) {
-      return { success: false, txData: null, error: err && err.message ? err.message : String(err) };
     }
   },
 

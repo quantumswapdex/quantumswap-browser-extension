@@ -52,12 +52,12 @@ renderer js  --Api.send-->  preload   renderer js  --Api.send-->  platform-bridg
     (`src/bridge/dispatch.js`) instead of `ipcRenderer.invoke`,
   - bundles the SDKs (`quantumcoin`, `quantumswap`, `seed-words`) + the embedded
     Go WASM, with Node built-ins polyfilled for the browser.
-- `src/bridge/handlers/**` — the ported bodies of the 47 `ipcMain.handle`
-  channels (crypto, format, seedwords, swap quotes/submits, send, staking,
-  offline signing, platform). Contract addresses, slippage/deadline math, gas
-  estimation, and the staking ABI are preserved verbatim; only `require(...)`
-  became `import`, and the local named-pipe/socket RPC paths were removed
-  (browsers can only reach RPC over HTTP/S).
+- `src/bridge/handlers/**` — the ported bodies of the `ipcMain.handle`
+  channels (crypto, format, seedwords, swap quotes/submits, send, platform).
+  Contract addresses, slippage/deadline math, and gas estimation are preserved
+  verbatim; only `require(...)` became `import`, and the local
+  named-pipe/socket RPC paths were removed (browsers can only reach RPC over
+  HTTP/S).
 - Crypto is fully browser-native — no third-party runtime crypto libraries.
   `scrypt` and `randomBytes` come from `quantumcoin`'s native implementations
   (post-quantum WASM + Web Crypto), and AES-256-CBC in `src/bridge/handlers/crypto.js`
@@ -227,8 +227,7 @@ Work through these in the popup to confirm parity with the desktop app:
 - **Copy address** (clipboard) and **open explorer link** (opens a new tab).
 - **Send** coins and tokens.
 - **Swap** — quote → approve/allowance → swap.
-- **Staking** — deposit / withdraw / pause / resume.
-- **Offline signing**, **QR display**, and **network switching**.
+- **QR display** and **network switching**.
 - **web3 dApp** — connect, sign a message, and send from `examples/dapp.html`
   (see [Test the web3 dApp example page](#test-the-web3-dapp-example-page)).
 
@@ -248,8 +247,8 @@ npm run build:icons
 - `node scripts/verify-crypto-parity.cjs` — asserts the browser-native AES-256-CBC
   (Web Crypto) matches Node byte-for-byte, so desktop-created keystores decrypt here.
 - `node scripts/smoke-wasm.cjs` — loads the built bundle in a browser-like
-  harness and exercises WASM init, wallet derivation, keystore encrypt/decrypt,
-  and offline PQC transaction signing.
+  harness and exercises WASM init, wallet derivation, and keystore
+  encrypt/decrypt.
 
 ## Notes / known constraints
 
