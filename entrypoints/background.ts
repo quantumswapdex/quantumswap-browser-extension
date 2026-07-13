@@ -348,9 +348,10 @@ export default defineBackground(() => {
       // so a 600x800 approval window is allowed (browser still clamps to screen).
       const width = 600;
       const height = 800;
-      // Center the popup over the browser window (fall back to no explicit
-      // position if the last-focused window can't be read).
-      centeredBounds(width, height)
+      // Anchor the popup near the right edge of the browser window (like
+      // MetaMask) so it doesn't cover the dApp's main content. Falls back to no
+      // explicit position if the last-focused window can't be read.
+      rightAnchoredBounds(width, height)
         .then((pos) => {
           const opts: any = { url, type: "popup", width, height };
           if (pos) { opts.left = pos.left; opts.top = pos.top; }
@@ -372,15 +373,19 @@ export default defineBackground(() => {
     });
   }
 
-  // Compute a top-left that centers a width x height popup over the currently
-  // focused browser window. Resolves null when the window bounds are unavailable.
-  function centeredBounds(width: number, height: number): Promise<{ left: number; top: number } | null> {
+  // Compute a top-left that places a width x height popup against the right
+  // edge of the currently focused browser window (small inset, near the top,
+  // roughly under the toolbar/extension icons) so the page's main content stays
+  // visible. Resolves null when the window bounds are unavailable.
+  function rightAnchoredBounds(width: number, height: number): Promise<{ left: number; top: number } | null> {
     return new Promise((resolve) => {
       try {
+        const RIGHT_INSET = 16; // gap from the browser window's right edge
+        const TOP_INSET = 80;   // clear the tab strip + toolbar
         const center = (win: any) => {
           if (!win || win.width == null || win.height == null) { resolve(null); return; }
-          const left = Math.round((win.left || 0) + (win.width - width) / 2);
-          const top = Math.round((win.top || 0) + (win.height - height) / 2);
+          const left = Math.round((win.left || 0) + win.width - width - RIGHT_INSET);
+          const top = Math.round((win.top || 0) + TOP_INSET);
           resolve({ left: Math.max(0, left), top: Math.max(0, top) });
         };
         const p = ext.windows.getLastFocused(
