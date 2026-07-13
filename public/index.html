@@ -109,33 +109,6 @@
         </div>
     </dialog>
 
-    <dialog id="modalOfflineTxnSigning" class="modal" tabindex="-1" role="dialog">
-        <div class="modal-content">
-            <div style="margin-bottom:10px;">
-                <h3 data-lang-key="offline-txn-signing">Offline Transaction Signing</h3>
-                <div style="margin-bottom:20px;">
-                    <label data-lang-key="help" style="cursor: pointer;">Help</label>: <a href="#" onclick="return openOfflineTxnSigningUrl();">QuantumCoin.org/offline-transaction-signing.html</a>
-                </div>
-                <div id="divOfflineTxnSigning">
-                    <div style="padding-bottom:20px;" class="network-template">
-                        <form id="offlineTxnSigningForm" style="display: flex; flex-direction: column; gap: 10px;">
-                            <div class="tab-label" style="text-align: left;cursor:pointer;" onclick="document.getElementById('optOfflineTxnSigningEnabled').checked  = true;" role="button">
-                                <input type="radio" name="optOfflineTxnSigning" value="enabled" class="safety_quiz_option" id="optOfflineTxnSigningEnabled" tabindex="2">
-                                <label data-lang-key="enabled" style="cursor: pointer;">Enabled</label>
-                            </div>
-                            <div class="tab-label" style="text-align: left;cursor:pointer;" onclick="document.getElementById('optOfflineTxnSigningDisabled').checked  = true;" role="button">
-                                <input type="radio" name="optOfflineTxnSigning" value="disabled" class="safety_quiz_option" id="optOfflineTxnSigningDisabled" tabindex="3">
-                                <label data-lang-key="disabled" style="cursor: pointer;">Disabled</label>
-                            </div>
-                        </form>
-                    </div>
-                </div>
-                <button class="oknetwork" data-lang-key="ok" role="button" id="btnOkOfflineTxnSigning" tabindex="4">Ok</button>
-                <button class="cancel" data-lang-key="cancel" role="button" id="btnCancelOfflineTxnSigning" tabindex="1">Cancel</button>
-            </div>
-        </div>
-    </dialog>
-
     <dialog id="modalAdvancedSigning" class="modal" tabindex="-1" role="dialog">
         <div class="modal-content">
             <div style="margin-bottom:10px;">
@@ -168,28 +141,6 @@
             <div style="float:left;" id="divLoadingModalIcon"><img src="assets/icons/loading.gif" style="width:70px;margin-top:12px;margin-right:10px;" alt="Loading" /></div>
             <div style="margin-bottom:10px;">
                 <div style="padding-bottom:20px;"><p id="pWaitDetails" class="scrollbar" style="overflow:auto;" tabindex="1">Some text in the Modal..</p></div>
-            </div>
-        </div>
-    </dialog>
-
-    <dialog id="modalOfflineSignature" class="modal" tabindex="-1" role="dialog">
-        <div class="modal-content">
-            <div style="margin-bottom:10px;">
-                <h3 data-lang-key="offline-txn-signing">Offline Transaction Signing</h3>
-                <div style="margin-bottom:20px;">
-                    <p>
-                        <label data-lang-key="offline-txn-help">Copy the below signed transaction and submit it at: </label> <a tabindex="4" href="#" onclick="return openOfflineTxnSigningUrl();">https://QuantumCoin.org/offline-transaction-signing.html</a>
-                    </p>
-                </div>
-                <div id="divOfflineSignature">
-                    <div style="padding-bottom:20px;" class="network-template">
-                           <textarea id="txtOfflineSignature" style="width: 100%;" disabled rows="15" cols="100" tabindex="1">
-
-                           </textarea>
-                        <div class="copy-container" role="button" style="float:left;" onclick="copyOfflineSignature()" id="divOfflineSignatureCopy" tabindex="2"></div>
-                    </div>
-                </div>
-                <button class="oknetwork" data-lang-key="ok" role="button" id="btnOkOfflineSignature" tabindex="3">Ok</button>
             </div>
         </div>
     </dialog>
@@ -322,6 +273,10 @@
                     <img class="tab-icon" src="assets/svg/settings.svg" alt="Settings Icon">
                     <div class="tab-name" data-lang-key="settings">Settings</div>
                 </div>
+                <div class="burger-item disabled" id="tab5" role="button" tabindex="16" onclick="closeBurgerMenu(); return showReleasesScreen();">
+                    <img class="tab-icon" src="assets/svg/release-tag.svg" alt="Releases Icon">
+                    <div class="tab-name" data-lang-key="releases">Releases</div>
+                </div>
             </div>
         </div>
         <div class="dropdown" onclick="return showNetworkDialog();" id="divNetworkDropdown" role="button" tabindex="1000" style="display:none;">
@@ -329,6 +284,7 @@
         </div>
 
         <div class="gradient" id="gradient">
+            <div id="divCustomReleaseBanner" class="custom-release-banner" style="display:none;"></div>
             <div class="logo">
                 <img src="assets/icons/app/dp.png" alt="Title" class="logoimg" id="imgLogo">
             </div>
@@ -1566,11 +1522,6 @@
                                     <option value="hei">Heisen</option>
                                 </select>
                             </div>
-                            <input class="tab-name"
-                                   style="text-align: left; width: 100%; border: none; outline: none; font-weight: 400;color:black;"
-                                   autocomplete="off" id="txtTokenContractAddress" name="contract_address" data-placeholder-key="token-contract-address"
-                                   placeholder="token contract address" tabindex="304">
-
                             <div id="divCoinTokenToSend" style="font-size: small">0x0000000000000000000000000000000000000000000000000000000000001000</div>
                             <div class="divider"></div>
                         </div>
@@ -1595,14 +1546,6 @@
                                    placeholder="Quantity to send" tabindex="306">
                             <div class="divider"></div>
                         </div>
-                        <div class="input_container" id="divCurrentNonce">
-                            <div data-lang-key="nonce-help" style="text-align: left;"></div>
-                            <input class="tab-name"
-                                   style="text-align: left; width: 100%; border: none; outline: none; font-weight: 500; color: black; letter-spacing: 0.11em;"
-                                   type="number" autocomplete="off" id="txtCurrentNonce" name="current_nonce" data-placeholder-key="current-nonce"
-                                   placeholder="Current Nonce" tabindex="307" maxlength="6">
-                            <div class="divider"></div>
-                        </div>
                         <div class="input_container">
                             <div style="width:100%;">
                                 <div style="float: left; width: 80%;">
@@ -1621,32 +1564,6 @@
                             <div class="large_button_container heading large" onclick="return sendCoins();" data-lang-key="send" role="button" tabindex="310" id="btnSendCoins">
                                 Send
                             </div>
-                            <div class="large_button_container heading large" onclick="return signOfflineSend();" data-lang-key="sign-offline" role="button" tabindex="311" style="margin-left:15px;" id="btnOfflineSign">
-                                Offline Sign
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <div class="center-content home-content" id="OfflineSignScreen" style="margin-top:110px;">
-                <div class="center-content-rounded-container">
-                    <div class="back-container" role="button" onclick="showSendScreen();" tabindex="3000">
-
-                    </div>
-                    <div class="tab-name" style="color:black;">
-                        <p>
-                            <label data-lang-key="offline-txn-help">Copy the below signed transaction and submit it at: </label> <a href="#" onclick="return openOfflineTxnSigningUrl();">https://QuantumCoin.org/offline-transaction-signing.html</a>
-                        </p>
-                    </div>
-                    <div class="roundex-box" style="padding-top: 15px; padding-bottom: 15px;">
-                        <div class="heading bold" data-lang-key="signed-transaction-details">Signed Transaction Details</div>
-                        <div class="divider"></div>
-                        <div class="input_container">
-                            <textarea id="txtSignedSendTransaction" style="width: 100%;" disabled rows="15" cols="100" tabindex="1">
-
-                             </textarea>
-                            <div class="copy-container" role="button" style="float:left;" onclick="copySignedSendTransaction()" id="divCopySignedSendTransaction" tabindex="2"></div>
                         </div>
                     </div>
                 </div>
@@ -1707,6 +1624,9 @@
                                    type="number" autocomplete="off" id="txtSwapToQuantity" name="swap_to_quantity" data-placeholder-key="quantity"
                                    placeholder="Quantity" tabindex="330" min="0" step="any" oninput="debouncedUpdateFromQuantityFromTo();">
                             <div class="divider"></div>
+                        </div>
+                        <div id="divSwapRoutePath" style="display: none; font-size: 0.85em; color: #372339; margin-top: 10px; word-break: break-all;">
+                            <span class="heading medium" data-lang-key="swap-route">Route</span>: <span id="spanSwapRoutePath"></span>
                         </div>
                         <div style="display: flex; align-items: center; justify-content: flex-end; gap: 10px;margin-top:10px;">
                             <div id="divSwapQuoteLoading" style="display: none;">
@@ -1996,91 +1916,6 @@
                 </div>
             </div>
 
-            <div class="center-content home-content" id="ValidatorScreen" style="margin-top:110px;">
-                <div class="center-content-rounded-container">
-                    <div class="back-container" role="button" onclick="showSettingsScreen();" tabindex="2308">
-
-                    </div>
-                    <div class="roundex-box scrollbar" style="padding-top: 15px; padding-bottom: 15px;overflow-y: auto;overflow-x: auto;">
-                        <div class="gas-header-row">
-                            <div class="heading bold" data-lang-key="validator">Validator</div>
-                            <div class="gas-header-right">
-                                <span id="spanValidatorGasFee" class="gas-fee-label"></span>
-                                <div id="divValidatorGasIcon" class="gas-container" role="button" tabindex="2310" onclick="return onValidatorGasIconClick();"></div>
-                            </div>
-                        </div>
-                        <div class="tab-name" style="color:black;">
-                                <div class="divider"></div>
-                                <label data-lang-key="validator-help" style="margin-top:5px">Use the following options to manage your validation. Use these options only if you want to run a validator node or if you are already running one.
-                                    You can check your validation status at: </label><a href="#" onclick="return openValidatorPage();" id="ahrefValidatorPage" tabindex="2309">link here</a>
-                        </div>
-
-                        <div class="input_container" id="divValidatorOptions">
-                            <div class="selectwrapper">
-                                <select id="ddlValidatorOptions" class="selectbox" tabindex="2300" onchange="updateValidatorScreen();">
-                                    <option value="none">(select an option)</option>
-                                    <option value="newdeposit">New Validator Deposit</option>
-                                    <option value="increasedeposit">Increase Deposit</option>
-                                    <option value="initiatepartialwithdrawal">Initiate Partial Withdrawal</option>
-                                    <option value="completepartialwithdrawal">Complete Partial Withdrawal</option>
-                                    <option value="pausevalidation">Pause Validation</option>
-                                    <option value="resumevalidation">Resume Validation</option>
-                                </select>
-                            </div>
-                        </div>
-                        <div class="input_container" id="divValidatorAddress">
-                            <div class="heading medium" data-lang-key="validator-address">Validator Address</div>
-                            <input class="tab-name"
-                                   style="text-align: left; width: 100%; border: none; outline: none; font-weight: 400;color:black;"
-                                   autocomplete="off" id="txtValidatorAddress" name="validator_address" data-placeholder-key="validator-address"
-                                   placeholder="Validator Address" tabindex="2301">
-                            <div class="divider"></div>
-                        </div>
-                        <div class="input_container" id="divValidatorDepositCoins">
-                            <div class="heading medium" data-lang-key="quantity">Quantity</div>
-                            <input class="tab-name"
-                                   style="text-align: left; width: 100%; border: none; outline: none; font-weight: 500; color: black; letter-spacing: 0.11em;"
-                                   type="number" autocomplete="off" id="txtValidatorDepositCoins" name="validator_deposit_coins" data-placeholder-key="quantity"
-                                   placeholder="Quantity" tabindex="2302">
-                            <div class="divider"></div>
-                        </div>
-                        <div class="input_container" id="divCurrentNonceValidator">
-                            <div data-lang-key="nonce-help" style="text-align: left;"></div>
-                            <input class="tab-name"
-                                   style="text-align: left; width: 100%; border: none; outline: none; font-weight: 500; color: black; letter-spacing: 0.11em;"
-                                   type="number" autocomplete="off" id="txtCurrentNonceValidator" name="current_nonce_validator" data-placeholder-key="current-nonce"
-                                   placeholder="Current Nonce" tabindex="2303" maxlength="6">
-                            <div class="divider"></div>
-                        </div>
-                        <div class="input_container" id="divValidatorScreenPassword">
-                            <div class="heading medium" data-lang-key="enter-wallet-password"  style="margin-top:5px">Enter Wallet Password</div>
-                            <div style="width:100%;">
-                                <div style="float: left; width: 80%;">
-                                    <input class="tab-name"
-                                           style="margin-top:5px; text-align: left; width: 100%; border: none; outline: none; font-weight: 500; color: black; letter-spacing: 0.11em;"
-                                           type="password" autocomplete="off" id="pwdValidator" name="password" data-placeholder-key="password"
-                                           placeholder="password" tabindex="2304">
-                                </div>
-                                <div style="float:left;margin-top:5px;">
-                                    <img src="assets/svg/eye-outline.svg" alt="Show Password" style="cursor:pointer;width:20px;" onclick="togglePasswordBox(this, 'pwdValidator');" data-alt-key="show-password" role="button" tabindex="2305" />
-                                </div>
-                            </div>
-                            <div class="divider"></div>
-                        </div>
-                        <div class="divider"></div>
-                        <div style="display: flex; justify-content: flex-end;" id="divValidatorButton">
-
-                            <div class="large_button_container heading large" onclick="return validation();" data-lang-key="submit" role="button" tabindex="2306" id="btnValidation" style="float:right;">
-                                Submit
-                            </div>
-                            <div class="large_button_container heading large" onclick="return validation();" data-lang-key="sign-offline" role="button" tabindex="2307" style="margin-left:15px;float:right;" id="btnOfflineValidation">
-                                Offline Sign
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
         </div>
 
 
@@ -2108,15 +1943,7 @@
                                 </div>
                                 <div class="divider"></div>
                                 <div class="vertical-menu-item">
-                                    <a href="#" onclick="return showOfflineTxnSettingDialog();" data-lang-key="offline-txn-signing" tabindex="4002">Offline Transaction Signing</a>
-                                </div>
-                                <div class="divider"></div>
-                                <div class="vertical-menu-item">
                                     <a href="#" onclick="return showAdvancedSigningSettingDialog();" data-lang-key="signing" tabindex="4003">Signing</a>
-                                </div>
-                                <div class="divider"></div>
-                                <div class="vertical-menu-item">
-                                    <a href="#" onclick="return showValidatorScreen();" data-lang-key="validator-options" tabindex="4004">Validator Options</a>
                                 </div>
                                 <div class="divider"></div>
                             </div>
@@ -2190,6 +2017,84 @@
                         </div>
 
                         <div class="large_button_container heading large" onclick="addNetwork();" style="float:right;" data-lang-key="add" role="button" tabindex="2">
+                            Add
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="content" id="releaseListScreen" style="display: none;">
+            <div class="center-content">
+                <div class="center-content-rounded-container">
+                    <div class="back-container" role="button" onclick="showWalletScreen()" tabindex="3">
+
+                    </div>
+                    <div class="roundex-box" style="padding-top: 15px; padding-bottom: 15px;">
+                        <div>
+                            <div class="heading large" style="float:left;width:fit-content;" data-lang-key="releases">Releases</div>
+                        </div>
+                        <div class="divider"></div>
+                        <div class="blocks-content scrollbar" style="text-align: left; overflow: auto ;max-height:380px;" id="divReleaseList" tabindex="1">
+                            <table class="styled-table">
+                                <thead>
+                                    <tr>
+                                        <th data-lang-key="active">Active</th>
+                                        <th data-lang-key="name">Name</th>
+                                        <th data-lang-key="release-wq">WQ</th>
+                                        <th data-lang-key="release-factory">Factory</th>
+                                        <th data-lang-key="release-router">Router</th>
+                                        <th></th>
+                                    </tr>
+                                </thead>
+                                <tbody id="tbodyReleaseRow">
+                                </tbody>
+                            </table>
+                        </div>
+                        <div class="divider"></div>
+                        <div style="align-content:center;"><a href="#" data-lang-key="add-release" onclick="return showAddReleaseScreen();" tabindex="2">Add Release</a></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="content" id="releaseAddScreen" style="display: none;">
+            <div class="center-content">
+                <div class="center-content-rounded-container">
+                    <div class="back-container" role="button" onclick="showReleasesScreen()" tabindex="3">
+
+                    </div>
+                    <div class="roundex-box" style="padding-top: 15px; padding-bottom: 15px;">
+                        <div>
+                            <div class="heading large" style="float:left;width:fit-content;" data-lang-key="add-release">Add Release</div>
+                        </div>
+                        <div class="divider"></div>
+                        <div class="blocks-content scrollbar" style="text-align: left; overflow: auto ;">
+                            <div class="input_container">
+                                <div class="heading medium" data-lang-key="release-name">Release Name</div>
+                                <input class="tab-name"
+                                       style="text-align: left; width: 100%; border: none; outline: none; font-weight: 500; color: black; letter-spacing: 0.11em;"
+                                       type="text" autocomplete="off" id="txtReleaseName" name="release_name" maxlength="60" tabindex="1">
+                                <div class="divider"></div>
+                                <div class="heading medium" data-lang-key="release-wq-address">WQ Contract Address</div>
+                                <input class="tab-name"
+                                       style="text-align: left; width: 100%; border: none; outline: none; font-weight: 500; color: black; letter-spacing: 0.11em;"
+                                       type="text" autocomplete="off" id="txtReleaseWq" name="release_wq" placeholder="0x..." tabindex="2">
+                                <div class="divider"></div>
+                                <div class="heading medium" data-lang-key="release-factory-address">Factory Contract Address</div>
+                                <input class="tab-name"
+                                       style="text-align: left; width: 100%; border: none; outline: none; font-weight: 500; color: black; letter-spacing: 0.11em;"
+                                       type="text" autocomplete="off" id="txtReleaseFactory" name="release_factory" placeholder="0x..." tabindex="3">
+                                <div class="divider"></div>
+                                <div class="heading medium" data-lang-key="release-router-address">Router Contract Address</div>
+                                <input class="tab-name"
+                                       style="text-align: left; width: 100%; border: none; outline: none; font-weight: 500; color: black; letter-spacing: 0.11em;"
+                                       type="text" autocomplete="off" id="txtReleaseRouter" name="release_router" placeholder="0x..." tabindex="4">
+                                <div class="divider"></div>
+                            </div>
+                        </div>
+
+                        <div class="large_button_container heading large" onclick="addRelease();" style="float:right;" data-lang-key="add" role="button" tabindex="5">
                             Add
                         </div>
                     </div>
@@ -2585,19 +2490,13 @@
     <script src="js/wallet.js"></script>
     <script src="js/tokenfilter.js"></script>
     <script src="js/blockchain-network.js"></script>
+    <script src="js/release.js"></script>
     <script src="js/dialog.js"></script>
     <script src="js/app.js"></script>
     <script src="js/send.js"></script>
     <script src="js/api.js"></script>
     <script src="lib/autocomplete/autocomplete.js"></script>
     <script src="js/token.js"></script>
-    <script src="js/validator/validator.js"></script>
-    <script src="js/validator/completepartialwithdrawal.js"></script>
-    <script src="js/validator/increasedeposit.js"></script>
-    <script src="js/validator/initiatepartialwithdrawal.js"></script>
-    <script src="js/validator/newdeposit.js"></script>
-    <script src="js/validator/pausevalidation.js"></script>
-    <script src="js/validator/resumevalidation.js"></script>
 
     <script src="js/boot.js"></script>
 

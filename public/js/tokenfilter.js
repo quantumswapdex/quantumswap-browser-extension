@@ -5,10 +5,11 @@
 // Recognition is by contract address only (not chainId-keyed). Symbol/name
 // are only used to detect stablecoin impersonators.
 
-const RECOGNIZED_TOKEN_ADDRESSES = new Set([
-    "0xe8ea8beb86e714ef2bde0afac17d6e45d1c35e48f312d6dc12c4fdb90d9e8a3d", // Heisen
-    "0xa8036870874fbed790ed4d3bbd41b2f390b9858ff021f2993e90c6d1cbb167c7"  // Y2Q
-]);
+// Single source of truth: src/bridge/token-constants.js, exposed on window by
+// the platform bridge (loaded before this script in index.html).
+const RECOGNIZED_TOKEN_ADDRESSES = new Set(
+    (window.RECOGNIZED_TOKEN_CONTRACT_ADDRESSES || []).map(a => a.toLowerCase())
+);
 
 const STABLECOIN_IMPERSONATOR_PATTERNS = [
     "usd", "dai", "tether", "stable", "stablecoin",

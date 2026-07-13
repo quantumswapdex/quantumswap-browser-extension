@@ -164,22 +164,6 @@ async function submitSendTransaction(payload) {
     return await SwapQuoteApi.send('SendTransactionSubmit', payload);
 }
 
-async function offlineSignCoinTransaction(payload) {
-    return await SwapQuoteApi.send('OfflineSignCoinTransaction', payload);
-}
-
-async function offlineSignTokenTransaction(payload) {
-    return await SwapQuoteApi.send('OfflineSignTokenTransaction', payload);
-}
-
-async function submitStakingContract(payload) {
-    return await SwapQuoteApi.send('StakingContractSubmit', payload);
-}
-
-async function offlineSignStakingContract(payload) {
-    return await SwapQuoteApi.send('StakingContractOfflineSign', payload);
-}
-
 async function cryptoRandomBytes(size) {
     return await CryptoApi.send('CryptoRandomBytes', size);
 }

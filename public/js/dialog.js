@@ -67,7 +67,7 @@ var gasConfigFeeRate = null;
 
 // Bind a one-time input listener on the gas-limit field that recomputes the fee
 // field as (gasLimit * gasConfigFeeRate). Generic: applies to every screen that
-// opens this dialog (send, validator, swap), since they all share these inputs.
+// opens this dialog (send, swap), since they all share these inputs.
 function bindGasLimitRecompute(limitEl, feeEl) {
     if (!limitEl || !feeEl || limitEl.dataset.gasRecomputeBound) return;
     limitEl.dataset.gasRecomputeBound = "1";
@@ -149,12 +149,6 @@ var modalNetwork = document.getElementById("modalNetworkDialog");
 var spanNetwork = document.getElementsByClassName("oknetwork")[0];
 var spanCancelNetwork = document.getElementById("divCancelNetwork");
 var onCloseFuncNetwork = null;
-
-//Offline Txn Signing
-var modaOfflineTxnSigning = document.getElementById("modalOfflineTxnSigning");
-var btnOkOfflineTxnSigning = document.getElementById("btnOkOfflineTxnSigning");
-var btnCancelOfflineTxnSigning = document.getElementById("btnCancelOfflineTxnSigning");
-var onCloseFuncOfflineTxnSigning = null;
 
 var modalAdvancedSigning = document.getElementById("modalAdvancedSigning");
 var btnOkAdvancedSigning = document.getElementById("btnOkAdvancedSigning");
@@ -274,43 +268,6 @@ spanCancelNetwork.onclick = function () {
     onCloseFuncNetwork = null;
 }
 
-async function showOfflineTxnSettingDialog(f) {
-    var defaultVal = await offlineTxnSigningGetDefaultValue();
-    if (defaultVal == false) {
-        document.getElementById('optOfflineTxnSigningDisabled').checked = true;
-    } else {
-        document.getElementById('optOfflineTxnSigningEnabled').checked = true;
-    }
-    modaOfflineTxnSigning.style.display = "block";
-    modaOfflineTxnSigning.showModal();
-    onCloseFuncOfflineTxnSigning = f;
-    return false;
-}
-
-btnOkOfflineTxnSigning.onclick = function () {
-    modaOfflineTxnSigning.style.display = "none";
-    modaOfflineTxnSigning.close();
-    var offlineTxnSigningValue = document.querySelector('input[name="optOfflineTxnSigning"]:checked')?.value;
-    if (!offlineTxnSigningValue || offlineTxnSigningValue === "") {
-
-    } else {
-        saveSelectedOfflineTxnSigningSetting();
-    }
-
-    if (onCloseFuncOfflineTxnSigning == null) {
-
-    } else {
-        onCloseFuncOfflineTxnSigning();
-        onCloseFuncOfflineTxnSigning = null;
-    }
-}
-
-btnCancelOfflineTxnSigning.onclick = function () {
-    modaOfflineTxnSigning.style.display = "none";
-    modaOfflineTxnSigning.close();
-    onCloseFuncOfflineTxnSigning = null;
-}
-
 async function showAdvancedSigningSettingDialog(f) {
     var defaultVal = await advancedSigningGetDefaultValue();
     if (defaultVal == false) {
@@ -360,7 +317,7 @@ var txReviewRequirePassword = false;
 var modalSendCompleted = document.getElementById("modalSendCompleted");
 
 window.onclick = function (event) {
-    if (event.target == modalOkDialog || event.target == modalConfirm || event.target == modalYesNoDialog || event.target == modalNetwork || event.target == modaOfflineTxnSigning || event.target == modalAdvancedSigning || event.target == modalOfflineSignature || event.target == modalSwapApprovalSubmit || event.target == modalTransactionReview || event.target == modalSendCompleted || event.target == modalGasConfig) {
+    if (event.target == modalOkDialog || event.target == modalConfirm || event.target == modalYesNoDialog || event.target == modalNetwork || event.target == modalAdvancedSigning || event.target == modalSwapApprovalSubmit || event.target == modalTransactionReview || event.target == modalSendCompleted || event.target == modalGasConfig) {
         if (modalOkDialog.style.display !== "none") {
             modalNetwork.style.display = "none";
             modalNetwork.close();
@@ -380,11 +337,6 @@ window.onclick = function (event) {
         if (modalNetwork.style.display !== "none") {
             modalNetwork.style.display = "none";
             modalNetwork.close();
-        }
-
-        if (modaOfflineTxnSigning.style.display !== "none") {
-            modaOfflineTxnSigning.style.display = "none";
-            modaOfflineTxnSigning.close();
         }
 
         if (modalAdvancedSigning && modalAdvancedSigning.style.display !== "none") {
@@ -469,31 +421,6 @@ spanIAgree.onclick = async function () {
     modalEulaDialog.close();
     await storeEulaAccepted();
     await resumePostEula();
-}
-
-//Offline Signature
-var modalOfflineSignature = document.getElementById("modalOfflineSignature");
-var btnOkOfflineSignature = document.getElementById("btnOkOfflineSignature");
-var onCloseFuncOfflineSignature = null;
-
-async function showOfflineSignatureDialog(txData, f) {
-    document.getElementById('txtOfflineSignature').value = txData;
-    modalOfflineSignature.style.display = "block";
-    modalOfflineSignature.showModal();
-    onCloseFuncOfflineSignature = f;
-    return false;
-}
-
-btnOkOfflineSignature.onclick = function () {
-    modalOfflineSignature.style.display = "none";
-    modalOfflineSignature.close();
-
-    if (onCloseFuncOfflineSignature == null) {
-
-    } else {
-        onCloseFuncOfflineSignature();
-        onCloseFuncOfflineSignature = null;
-    }
 }
 
 function closeTransactionReviewDialog() {

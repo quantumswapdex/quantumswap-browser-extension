@@ -1,12 +1,10 @@
-// Ported from the swap/send/staking/offline-signing ipcMain.handle handlers in the
-// desktop src/index.js. Logic (contract addresses, slippage/deadline math, gas
-// estimation, staking ABI) is preserved verbatim. The only removals are the
-// Windows named-pipe / unix-socket ("IPC") RPC code paths, which cannot exist in a
-// browser: RPC endpoints are HTTP(S) only here.
+// Ported from the swap/send ipcMain.handle handlers in the desktop src/index.js.
+// Logic (contract addresses, slippage/deadline math, gas estimation) is preserved
+// verbatim. The only removals are the Windows named-pipe / unix-socket ("IPC") RPC
+// code paths, which cannot exist in a browser: RPC endpoints are HTTP(S) only here.
 import { Initialize, Config } from "quantumcoin/config";
 import {
   Wallet,
-  Contract,
   Interface,
   parseUnits,
   formatUnits,
@@ -19,6 +17,12 @@ import {
   QuantumSwapV2Factory,
   IERC20,
 } from "quantumswap";
+import { RECOGNIZED_TOKEN_CONTRACT_ADDRESSES } from "../token-constants.js";
+import {
+  SWAP_WQ_CONTRACT_ADDRESS,
+  SWAP_FACTORY_CONTRACT_ADDRESS,
+  SWAP_ROUTER_V2_CONTRACT_ADDRESS,
+} from "../release-constants.js";
 
 function signingOverrides(wallet, data, base) {
   const fullSign = data && data.advancedSigningEnabled === true;
@@ -39,12 +43,182 @@ function sanitizeSwapError(err) {
   return msg.replace(/uniswap/gi, "").trim();
 }
 
-const SWAP_WQ_CONTRACT_ADDRESS =
-  "0x0E49c26cd1ca19bF8ddA2C8985B96783288458754757F4C9E00a5439A7291628";
-const SWAP_FACTORY_CONTRACT_ADDRESS =
-  "0xbbF45a1B60044669793B444eD01Eb33e03Bb8cf3c5b6ae7887B218D05C5Cbf1d";
-const SWAP_ROUTER_V2_CONTRACT_ADDRESS =
-  "0x41323EF72662185f44a03ea0ad8094a0C9e925aB1102679D8e957e838054aac5";
+// ---- Release (deployment) resolution ----
+// Swap payloads may carry `releaseWq` / `releaseFactory` / `releaseRouter` to
+// target a user-selected release (custom deployment of the three core
+// contracts). Each present field must be a valid address (getAddress throws
+// otherwise, and the handler's catch surfaces the error rather than silently
+// swapping against the wrong deployment); absent fields fall back to the
+// built-in release from src/bridge/release-constants.js.
+function resolveSwapReleaseAddresses(data) {
+  function pick(raw, fallback) {
+    if (raw == null || typeof raw !== "string" || raw.trim() === "") return fallback;
+    return getAddress(raw.trim());
+  }
+  const d = data && typeof data === "object" ? data : {};
+  return {
+    wq: pick(d.releaseWq, SWAP_WQ_CONTRACT_ADDRESS),
+    factory: pick(d.releaseFactory, SWAP_FACTORY_CONTRACT_ADDRESS),
+    router: pick(d.releaseRouter, SWAP_ROUTER_V2_CONTRACT_ADDRESS),
+  };
+}
+
+// ---- Multi-hop swap routing ----
+// When no direct pair exists between the two tokens, a route is searched through
+// intermediate hop candidates (the release's wrapped Q + the recognized tokens
+// from src/bridge/token-constants.js), with at most SWAP_MAX_INTERMEDIATE_HOPS
+// tokens between the from- and to-token.
+const SWAP_MAX_INTERMEDIATE_HOPS = 3;
+function swapHopCandidateAddresses(release) {
+  return [release.wq, ...RECOGNIZED_TOKEN_CONTRACT_ADDRESSES];
+}
+
+const SWAP_NO_ROUTE_ERROR =
+  "No swap route exists between these two tokens: no direct pair and no route through intermediate tokens (max 3 hops).";
+
+// Route + symbol caches. Pairs rarely change, so a short TTL avoids re-querying
+// the factory on every debounced quote / gas-estimate while a swap is being set up.
+const SWAP_ROUTE_CACHE_TTL_MS = 60000;
+const swapRouteCache = new Map();
+const swapPathSymbolCache = new Map();
+
+function mapSwapTokenValue(value, release) {
+  return value === "Q" ? release.wq : value;
+}
+
+async function factoryPairExists(factory, tokenA, tokenB) {
+  const pairAddr = await factory.getPair(tokenA, tokenB);
+  const pairAddrStr =
+    typeof pairAddr === "string"
+      ? pairAddr
+      : pairAddr && pairAddr.toString
+        ? pairAddr.toString()
+        : String(pairAddr);
+  const zeroAddr =
+    ZeroAddress || "0x0000000000000000000000000000000000000000000000000000000000000000";
+  return !!(pairAddrStr && pairAddrStr !== zeroAddr && pairAddrStr !== "0x" + "0".repeat(64));
+}
+
+// Find a router path from `fromAddrRaw` to `toAddrRaw`: the direct pair when it
+// exists, otherwise the shortest route (BFS) through the hop candidates, limited
+// to SWAP_MAX_INTERMEDIATE_HOPS intermediate tokens. Returns an array of
+// checksummed addresses ([from, ...hops, to]) or null when no route exists.
+async function findSwapPath(provider, chainId, fromAddrRaw, toAddrRaw, release) {
+  const fromAddr = getAddress(fromAddrRaw);
+  const toAddr = getAddress(toAddrRaw);
+  // The factory address is part of the key: each release has its own pair set,
+  // so a route cached for one release must never be served for another.
+  const cacheKey =
+    chainId +
+    "|" +
+    release.factory.toLowerCase() +
+    "|" +
+    fromAddr.toLowerCase() +
+    "|" +
+    toAddr.toLowerCase();
+  const cached = swapRouteCache.get(cacheKey);
+  if (cached && Date.now() - cached.at < SWAP_ROUTE_CACHE_TTL_MS) return cached.path;
+
+  const factory = QuantumSwapV2Factory.connect(release.factory, provider);
+  let path = null;
+  if (await factoryPairExists(factory, fromAddr, toAddr)) {
+    path = [fromAddr, toAddr];
+  } else {
+    const seen = new Set([fromAddr.toLowerCase(), toAddr.toLowerCase()]);
+    const hops = [];
+    for (const h of swapHopCandidateAddresses(release)) {
+      const addr = getAddress(h);
+      if (seen.has(addr.toLowerCase())) continue;
+      seen.add(addr.toLowerCase());
+      hops.push(addr);
+    }
+    const nodes = [fromAddr, ...hops, toAddr];
+    const target = nodes.length - 1;
+    // Query every remaining pair among the nodes in parallel (the direct
+    // from->to pair was already checked above), then BFS the pair graph.
+    const adj = nodes.map(() => []);
+    const checks = [];
+    for (let i = 0; i < nodes.length; i++) {
+      for (let j = i + 1; j < nodes.length; j++) {
+        if (i === 0 && j === target) continue;
+        checks.push(
+          factoryPairExists(factory, nodes[i], nodes[j]).then((exists) => {
+            if (exists) {
+              adj[i].push(j);
+              adj[j].push(i);
+            }
+          }),
+        );
+      }
+    }
+    await Promise.all(checks);
+
+    const maxEdges = SWAP_MAX_INTERMEDIATE_HOPS + 1;
+    const prev = new Array(nodes.length).fill(-1);
+    const depth = new Array(nodes.length).fill(-1);
+    depth[0] = 0;
+    const queue = [0];
+    while (queue.length) {
+      const cur = queue.shift();
+      if (cur === target) break;
+      if (depth[cur] >= maxEdges) continue;
+      for (const nxt of adj[cur]) {
+        if (depth[nxt] !== -1) continue;
+        depth[nxt] = depth[cur] + 1;
+        prev[nxt] = cur;
+        queue.push(nxt);
+      }
+    }
+    if (depth[target] !== -1 && depth[target] <= maxEdges) {
+      const idxPath = [];
+      for (let cur = target; cur !== -1; cur = prev[cur]) idxPath.unshift(cur);
+      path = idxPath.map((i) => nodes[i]);
+    }
+  }
+
+  if (swapRouteCache.size > 200) {
+    swapRouteCache.delete(swapRouteCache.keys().next().value);
+  }
+  swapRouteCache.set(cacheKey, { path, at: Date.now() });
+  return path;
+}
+
+// Resolve the router path for a swap between two UI token values ("Q" or a
+// contract address). Throws when no route exists so callers surface the error.
+async function resolveSwapPath(provider, chainId, fromTokenValue, toTokenValue, release) {
+  const path = await findSwapPath(
+    provider,
+    chainId,
+    mapSwapTokenValue(fromTokenValue, release),
+    mapSwapTokenValue(toTokenValue, release),
+    release,
+  );
+  if (!path) throw new Error(SWAP_NO_ROUTE_ERROR);
+  return path;
+}
+
+// On-chain symbol() for each path token, for the UI's route display. A failed
+// lookup yields null for that entry (the UI falls back to the address). The raw
+// symbol strings are untrusted RPC data: the UI must sanitize before rendering.
+async function getSwapPathSymbols(provider, chainId, path) {
+  return Promise.all(
+    path.map(async (addr) => {
+      const key = chainId + "|" + addr.toLowerCase();
+      if (swapPathSymbolCache.has(key)) return swapPathSymbolCache.get(key);
+      let symbol = null;
+      try {
+        const s = await IERC20.connect(addr, provider).symbol();
+        if (typeof s === "string" && s.trim() !== "") symbol = s;
+      } catch (e) {
+        /* leave null */
+      }
+      // Cache only successful lookups: a transient RPC failure must not pin the
+      // null (address-fallback) display for the rest of the session.
+      if (symbol != null) swapPathSymbolCache.set(key, symbol);
+      return symbol;
+    }),
+  );
+}
 
 // Browsers can only reach RPC over HTTP(S); the desktop's local IPC/pipe support
 // (isIpcLikeRpc/toNodeIpcPath/expandTildeInIpcPath) is intentionally dropped.
@@ -247,32 +421,6 @@ function applyGasBuffer(gasLimitBi, percent) {
   return (base * (100n + BigInt(pct))) / 100n;
 }
 
-const STAKING_CONTRACT_ADDRESS =
-  "0x0000000000000000000000000000000000000000000000000000000000001000";
-const STAKING_ABI_JSON = [{"anonymous":false,"inputs":[{"indexed":true,"internalType":"address","name":"depositorAddress","type":"address"},{"indexed":true,"internalType":"address","name":"oldValidatorAddress","type":"address"},{"indexed":true,"internalType":"address","name":"newValidatorAddress","type":"address"}],"name":"OnChangeValidator","type":"event"},{"anonymous":false,"inputs":[{"indexed":true,"internalType":"address","name":"depositorAddress","type":"address"},{"indexed":false,"internalType":"uint256","name":"withdrawalQuantity","type":"uint256"}],"name":"OnCompletePartialWithdrawal","type":"event"},{"anonymous":false,"inputs":[{"indexed":false,"internalType":"address","name":"depositorAddress","type":"address"},{"indexed":false,"internalType":"uint256","name":"netBalance","type":"uint256"}],"name":"OnCompleteWithdrawal","type":"event"},{"anonymous":false,"inputs":[{"indexed":true,"internalType":"address","name":"depositorAddress","type":"address"},{"indexed":false,"internalType":"uint256","name":"oldBalance","type":"uint256"},{"indexed":false,"internalType":"uint256","name":"newBalance","type":"uint256"}],"name":"OnIncreaseDeposit","type":"event"},{"anonymous":false,"inputs":[{"indexed":true,"internalType":"address","name":"depositorAddress","type":"address"},{"indexed":false,"internalType":"uint256","name":"withdrawalBlock","type":"uint256"},{"indexed":false,"internalType":"uint256","name":"withdrawalQuantity","type":"uint256"}],"name":"OnInitiatePartialWithdrawal","type":"event"},{"anonymous":false,"inputs":[{"indexed":true,"internalType":"address","name":"depositorAddress","type":"address"},{"indexed":true,"internalType":"address","name":"validatorAddress","type":"address"},{"indexed":false,"internalType":"uint256","name":"amount","type":"uint256"},{"indexed":false,"internalType":"uint256","name":"blockNumber","type":"uint256"},{"indexed":false,"internalType":"uint256","name":"blockTime","type":"uint256"}],"name":"OnNewDeposit","type":"event"},{"anonymous":false,"inputs":[{"indexed":false,"internalType":"address","name":"depositorAddress","type":"address"},{"indexed":false,"internalType":"address","name":"validatorAddress","type":"address"}],"name":"OnPauseValidation","type":"event"},{"anonymous":false,"inputs":[{"indexed":false,"internalType":"address","name":"depositorAddress","type":"address"},{"indexed":false,"internalType":"address","name":"validatorAddress","type":"address"}],"name":"OnResumeValidation","type":"event"},{"anonymous":false,"inputs":[{"indexed":true,"internalType":"address","name":"depositorAddress","type":"address"},{"indexed":false,"internalType":"uint256","name":"rewardAmount","type":"uint256"}],"name":"OnReward","type":"event"},{"anonymous":false,"inputs":[{"indexed":true,"internalType":"address","name":"depositorAddress","type":"address"},{"indexed":false,"internalType":"uint256","name":"slashedAmount","type":"uint256"}],"name":"OnSlashing","type":"event"},{"inputs":[{"internalType":"address","name":"depositorAddress","type":"address"},{"internalType":"uint256","name":"rewardAmount","type":"uint256"}],"name":"addDepositorReward","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"address","name":"depositorAddress","type":"address"},{"internalType":"uint256","name":"slashAmount","type":"uint256"}],"name":"addDepositorSlashing","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"address","name":"newValidatorAddress","type":"address"}],"name":"changeValidator","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[],"name":"completePartialWithdrawal","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"nonpayable","type":"function"},{"inputs":[],"name":"completeWithdrawal","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"address","name":"depositorAddress","type":"address"}],"name":"didDepositorEverExist","outputs":[{"internalType":"bool","name":"","type":"bool"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"address","name":"validatorAddress","type":"address"}],"name":"didValidatorEverExist","outputs":[{"internalType":"bool","name":"","type":"bool"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"address","name":"depositorAddress","type":"address"}],"name":"doesDepositorExist","outputs":[{"internalType":"bool","name":"","type":"bool"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"address","name":"validatorAddress","type":"address"}],"name":"doesValidatorExist","outputs":[{"internalType":"bool","name":"","type":"bool"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"address","name":"depositorAddress","type":"address"}],"name":"getBalanceOfDepositor","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"},{"inputs":[],"name":"getDepositorCount","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"address","name":"validatorAddress","type":"address"}],"name":"getDepositorOfValidator","outputs":[{"internalType":"address","name":"","type":"address"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"address","name":"depositorAddress","type":"address"}],"name":"getDepositorRewards","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"address","name":"depositorAddress","type":"address"}],"name":"getDepositorSlashings","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"address","name":"depositorAddress","type":"address"}],"name":"getNetBalanceOfDepositor","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"address","name":"validatorAddress","type":"address"}],"name":"getStakingDetails","outputs":[{"components":[{"internalType":"address","name":"Depositor","type":"address"},{"internalType":"address","name":"Validator","type":"address"},{"internalType":"uint256","name":"Balance","type":"uint256"},{"internalType":"uint256","name":"NetBalance","type":"uint256"},{"internalType":"uint256","name":"BlockRewards","type":"uint256"},{"internalType":"uint256","name":"Slashings","type":"uint256"},{"internalType":"bool","name":"IsValidationPaused","type":"bool"},{"internalType":"uint256","name":"WithdrawalBlock","type":"uint256"},{"internalType":"uint256","name":"WithdrawalAmount","type":"uint256"},{"internalType":"uint256","name":"LastNilBlockNumber","type":"uint256"},{"internalType":"uint256","name":"NilBlockCount","type":"uint256"}],"internalType":"struct IStakingContract.StakingDetails","name":"","type":"tuple"}],"stateMutability":"view","type":"function"},{"inputs":[],"name":"getTotalDepositedBalance","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"address","name":"depositorAddress","type":"address"}],"name":"getValidatorOfDepositor","outputs":[{"internalType":"address","name":"","type":"address"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"address","name":"depositorAddress","type":"address"}],"name":"getWithdrawalBlock","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"},{"inputs":[],"name":"increaseDeposit","outputs":[],"stateMutability":"payable","type":"function"},{"inputs":[{"internalType":"uint256","name":"amount","type":"uint256"}],"name":"initiatePartialWithdrawal","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"address","name":"validatorAddress","type":"address"}],"name":"isValidationPaused","outputs":[{"internalType":"bool","name":"","type":"bool"}],"stateMutability":"view","type":"function"},{"inputs":[],"name":"listValidators","outputs":[{"internalType":"address[]","name":"","type":"address[]"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"address","name":"validatorAddress","type":"address"}],"name":"newDeposit","outputs":[],"stateMutability":"payable","type":"function"},{"inputs":[],"name":"pauseValidation","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"address","name":"validatorAddress","type":"address"}],"name":"resetNilBlock","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[],"name":"resumeValidation","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"address","name":"validatorAddress","type":"address"}],"name":"setNilBlock","outputs":[],"stateMutability":"nonpayable","type":"function"}];
-
-const STAKING_ALLOWED_METHODS = [
-  "newDeposit",
-  "increaseDeposit",
-  "initiatePartialWithdrawal",
-  "completePartialWithdrawal",
-  "pauseValidation",
-  "resumeValidation",
-];
-
-function prepareStakingMethodArgs(abi, method, rawArgs) {
-  const fn = abi.find((f) => f.type === "function" && f.name === method);
-  if (!fn || !fn.inputs) return rawArgs || [];
-  const args = rawArgs || [];
-  return fn.inputs.map((input, i) => {
-    const val = args[i];
-    if (val == null) return val;
-    if (input.type === "address") return getAddress(val);
-    if (input.type === "uint256") return parseUnits(normalizeAmountString(String(val)), 18);
-    return val;
-  });
-}
-
 // Build the unsigned tx request (with `from`) for a given transaction kind, for estimateGas.
 async function buildEstimateGasTx(data, provider) {
   const chainId = Number(data.chainId);
@@ -309,8 +457,9 @@ async function buildEstimateGasTx(data, provider) {
   }
 
   if (txKind === "approve") {
-    const tokenAddr = data.fromTokenValue === "Q" ? SWAP_WQ_CONTRACT_ADDRESS : data.fromTokenValue;
-    const spenderAddr = SWAP_ROUTER_V2_CONTRACT_ADDRESS;
+    const release = resolveSwapReleaseAddresses(data);
+    const tokenAddr = mapSwapTokenValue(data.fromTokenValue, release);
+    const spenderAddr = release.router;
     const decimals = typeof data.fromDecimals === "number" ? data.fromDecimals : 18;
     const amountWei = parseUnits(normalizeAmountString(data.amount), decimals);
     const token = IERC20.connect(getAddress(tokenAddr), provider);
@@ -319,10 +468,15 @@ async function buildEstimateGasTx(data, provider) {
   }
 
   if (txKind === "swap") {
-    const router = QuantumSwapV2Router02.connect(SWAP_ROUTER_V2_CONTRACT_ADDRESS, provider);
-    const fromAddr = data.fromTokenValue === "Q" ? SWAP_WQ_CONTRACT_ADDRESS : data.fromTokenValue;
-    const toAddr = data.toTokenValue === "Q" ? SWAP_WQ_CONTRACT_ADDRESS : data.toTokenValue;
-    const path = [getAddress(fromAddr), getAddress(toAddr)];
+    const release = resolveSwapReleaseAddresses(data);
+    const router = QuantumSwapV2Router02.connect(release.router, provider);
+    const path = await resolveSwapPath(
+      provider,
+      chainId,
+      data.fromTokenValue,
+      data.toTokenValue,
+      release,
+    );
     const fromDecimals = typeof data.fromDecimals === "number" ? data.fromDecimals : 18;
     const toDecimals = typeof data.toDecimals === "number" ? data.toDecimals : 18;
     const toAddress = data.recipientAddress || data.toAddress;
@@ -356,18 +510,6 @@ async function buildEstimateGasTx(data, provider) {
     return { ...tx, from: getAddress(fromAddress || toAddress) };
   }
 
-  // Staking contract methods
-  if (STAKING_ALLOWED_METHODS && STAKING_ALLOWED_METHODS.includes(txKind)) {
-    const contract = new Contract(STAKING_CONTRACT_ADDRESS, STAKING_ABI_JSON, provider);
-    const methodArgs = prepareStakingMethodArgs(STAKING_ABI_JSON, txKind, data.methodArgs || []);
-    const tx = await contract.populateTransaction[txKind](...methodArgs);
-    const out = { ...tx, from: getAddress(fromAddress) };
-    if (data.value && data.value !== "0" && data.value !== "0.0") {
-      out.value = parseUnits(normalizeAmountString(data.value), 18);
-    }
-    return out;
-  }
-
   throw new Error("Unsupported txKind for estimateGas: " + txKind);
 }
 
@@ -381,11 +523,16 @@ export default {
       if (!provider) return { success: false, error: "Invalid RPC endpoint" };
 
       await Initialize(new Config(chainId, initRpcUrlForConfig(data.rpcEndpoint)));
-      const router = QuantumSwapV2Router02.connect(SWAP_ROUTER_V2_CONTRACT_ADDRESS, provider);
+      const release = resolveSwapReleaseAddresses(data);
+      const router = QuantumSwapV2Router02.connect(release.router, provider);
 
-      const fromAddr = data.fromTokenValue === "Q" ? SWAP_WQ_CONTRACT_ADDRESS : data.fromTokenValue;
-      const toAddr = data.toTokenValue === "Q" ? SWAP_WQ_CONTRACT_ADDRESS : data.toTokenValue;
-      const path = [getAddress(fromAddr), getAddress(toAddr)];
+      const path = await resolveSwapPath(
+        provider,
+        chainId,
+        data.fromTokenValue,
+        data.toTokenValue,
+        release,
+      );
 
       const fromDecimals = typeof data.fromDecimals === "number" ? data.fromDecimals : 18;
       const toDecimals = typeof data.toDecimals === "number" ? data.toDecimals : 18;
@@ -401,37 +548,35 @@ export default {
     }
   },
 
+  // Route check: `exists` is true when a direct pair OR a multi-hop route (max
+  // SWAP_MAX_INTERMEDIATE_HOPS intermediates) exists. `path` is the address route
+  // and `pathSymbols` the on-chain symbol for each path token (null entries when
+  // the lookup failed). Symbols are untrusted; the UI sanitizes before display.
   async SwapQuoteCheckPairExists(data) {
     try {
       const chainId = Number(data.chainId);
-      if (!Number.isInteger(chainId)) return { exists: false, error: "Invalid chain ID" };
+      if (!Number.isInteger(chainId))
+        return { exists: false, path: null, pathSymbols: null, error: "Invalid chain ID" };
 
       const provider = createQuantumRpcProvider(data.rpcEndpoint, chainId);
-      if (!provider) return { exists: false, error: "Invalid RPC endpoint" };
+      if (!provider)
+        return { exists: false, path: null, pathSymbols: null, error: "Invalid RPC endpoint" };
 
       await Initialize(new Config(chainId, initRpcUrlForConfig(data.rpcEndpoint)));
-      const factory = QuantumSwapV2Factory.connect(SWAP_FACTORY_CONTRACT_ADDRESS, provider);
-
-      const tokenA = data.fromTokenValue === "Q" ? SWAP_WQ_CONTRACT_ADDRESS : data.fromTokenValue;
-      const tokenB = data.toTokenValue === "Q" ? SWAP_WQ_CONTRACT_ADDRESS : data.toTokenValue;
-      const pairAddr = await factory.getPair(getAddress(tokenA), getAddress(tokenB));
-      const pairAddrStr =
-        typeof pairAddr === "string"
-          ? pairAddr
-          : pairAddr && pairAddr.toString
-            ? pairAddr.toString()
-            : String(pairAddr);
-      const zeroAddr =
-        ZeroAddress || "0x0000000000000000000000000000000000000000000000000000000000000000";
-      const exists = !!(
-        pairAddrStr &&
-        pairAddrStr !== zeroAddr &&
-        pairAddrStr !== "0x" + "0".repeat(64)
+      const release = resolveSwapReleaseAddresses(data);
+      const path = await findSwapPath(
+        provider,
+        chainId,
+        mapSwapTokenValue(data.fromTokenValue, release),
+        mapSwapTokenValue(data.toTokenValue, release),
+        release,
       );
+      if (!path) return { exists: false, path: null, pathSymbols: null, error: null };
 
-      return { exists, error: null };
+      const pathSymbols = await getSwapPathSymbols(provider, chainId, path);
+      return { exists: true, path, pathSymbols, error: null };
     } catch (err) {
-      return { exists: false, error: sanitizeSwapError(err) };
+      return { exists: false, path: null, pathSymbols: null, error: sanitizeSwapError(err) };
     }
   },
 
@@ -444,11 +589,16 @@ export default {
       if (!provider) return { success: false, error: "Invalid RPC endpoint" };
 
       await Initialize(new Config(chainId, initRpcUrlForConfig(data.rpcEndpoint)));
-      const router = QuantumSwapV2Router02.connect(SWAP_ROUTER_V2_CONTRACT_ADDRESS, provider);
+      const release = resolveSwapReleaseAddresses(data);
+      const router = QuantumSwapV2Router02.connect(release.router, provider);
 
-      const fromAddr = data.fromTokenValue === "Q" ? SWAP_WQ_CONTRACT_ADDRESS : data.fromTokenValue;
-      const toAddr = data.toTokenValue === "Q" ? SWAP_WQ_CONTRACT_ADDRESS : data.toTokenValue;
-      const path = [getAddress(fromAddr), getAddress(toAddr)];
+      const path = await resolveSwapPath(
+        provider,
+        chainId,
+        data.fromTokenValue,
+        data.toTokenValue,
+        release,
+      );
 
       const fromDecimals = typeof data.fromDecimals === "number" ? data.fromDecimals : 18;
       const toDecimals = typeof data.toDecimals === "number" ? data.toDecimals : 18;
@@ -474,11 +624,16 @@ export default {
       if (!provider) return { success: false, gasLimit: null, error: "Invalid RPC endpoint" };
 
       await Initialize(new Config(chainId, initRpcUrlForConfig(data.rpcEndpoint)));
-      const router = QuantumSwapV2Router02.connect(SWAP_ROUTER_V2_CONTRACT_ADDRESS, provider);
+      const release = resolveSwapReleaseAddresses(data);
+      const router = QuantumSwapV2Router02.connect(release.router, provider);
 
-      const fromAddr = data.fromTokenValue === "Q" ? SWAP_WQ_CONTRACT_ADDRESS : data.fromTokenValue;
-      const toAddr = data.toTokenValue === "Q" ? SWAP_WQ_CONTRACT_ADDRESS : data.toTokenValue;
-      const path = [getAddress(fromAddr), getAddress(toAddr)];
+      const path = await resolveSwapPath(
+        provider,
+        chainId,
+        data.fromTokenValue,
+        data.toTokenValue,
+        release,
+      );
       const fromDecimals = typeof data.fromDecimals === "number" ? data.fromDecimals : 18;
       const toDecimals = typeof data.toDecimals === "number" ? data.toDecimals : 18;
       const toAddress = data.recipientAddress || data.toAddress;
@@ -532,8 +687,9 @@ export default {
         return { success: false, sufficient: false, error: "Owner address required" };
 
       await Initialize(new Config(chainId, initRpcUrlForConfig(data.rpcEndpoint)));
-      const tokenAddr = data.fromTokenValue === "Q" ? SWAP_WQ_CONTRACT_ADDRESS : data.fromTokenValue;
-      const spenderAddr = SWAP_ROUTER_V2_CONTRACT_ADDRESS;
+      const release = resolveSwapReleaseAddresses(data);
+      const tokenAddr = mapSwapTokenValue(data.fromTokenValue, release);
+      const spenderAddr = release.router;
       const decimals = typeof data.fromDecimals === "number" ? data.fromDecimals : 18;
       const requiredWei = parseUnits(normalizeAmountString(data.requiredAmount), decimals);
       const token = IERC20.connect(getAddress(tokenAddr), provider);
@@ -571,8 +727,9 @@ export default {
       if (!data.fromAddress) return { success: false, gasLimit: null, error: "From address required" };
 
       await Initialize(new Config(chainId, initRpcUrlForConfig(data.rpcEndpoint)));
-      const tokenAddr = data.fromTokenValue === "Q" ? SWAP_WQ_CONTRACT_ADDRESS : data.fromTokenValue;
-      const spenderAddr = SWAP_ROUTER_V2_CONTRACT_ADDRESS;
+      const release = resolveSwapReleaseAddresses(data);
+      const tokenAddr = mapSwapTokenValue(data.fromTokenValue, release);
+      const spenderAddr = release.router;
       const decimals = typeof data.fromDecimals === "number" ? data.fromDecimals : 18;
       const amountWei = parseUnits(normalizeAmountString(data.amount), decimals);
 
@@ -660,8 +817,13 @@ export default {
     }
   },
 
-  async SwapQuoteGetRouterAddress() {
-    return { success: true, routerAddress: SWAP_ROUTER_V2_CONTRACT_ADDRESS, error: null };
+  async SwapQuoteGetRouterAddress(data) {
+    try {
+      const release = resolveSwapReleaseAddresses(data);
+      return { success: true, routerAddress: release.router, error: null };
+    } catch (err) {
+      return { success: false, routerAddress: null, error: sanitizeSwapError(err) };
+    }
   },
 
   async SwapQuoteGetSwapContractData(data) {
@@ -678,11 +840,16 @@ export default {
         return { success: false, dataHex: null, toAddress: null, valueHex: null, error: "Recipient address required" };
 
       await Initialize(new Config(chainId, initRpcUrlForConfig(data.rpcEndpoint)));
-      const router = QuantumSwapV2Router02.connect(SWAP_ROUTER_V2_CONTRACT_ADDRESS, provider);
+      const release = resolveSwapReleaseAddresses(data);
+      const router = QuantumSwapV2Router02.connect(release.router, provider);
 
-      const fromAddr = data.fromTokenValue === "Q" ? SWAP_WQ_CONTRACT_ADDRESS : data.fromTokenValue;
-      const toAddr = data.toTokenValue === "Q" ? SWAP_WQ_CONTRACT_ADDRESS : data.toTokenValue;
-      const path = [getAddress(fromAddr), getAddress(toAddr)];
+      const path = await resolveSwapPath(
+        provider,
+        chainId,
+        data.fromTokenValue,
+        data.toTokenValue,
+        release,
+      );
       const fromDecimals = typeof data.fromDecimals === "number" ? data.fromDecimals : 18;
       const toDecimals = typeof data.toDecimals === "number" ? data.toDecimals : 18;
       const deadline = await getSwapTxDeadline(provider, 1200);
@@ -715,7 +882,7 @@ export default {
       if (!dataHex)
         return { success: false, dataHex: null, toAddress: null, valueHex: null, error: "No contract data" };
       const valueHex = tx.value != null && tx.value !== 0n ? "0x" + tx.value.toString(16) : "0x0";
-      return { success: true, dataHex, toAddress: SWAP_ROUTER_V2_CONTRACT_ADDRESS, valueHex, error: null };
+      return { success: true, dataHex, toAddress: release.router, valueHex, error: null };
     } catch (err) {
       return { success: false, dataHex: null, toAddress: null, valueHex: null, error: formatSwapRouterRevertError(err) };
     }
@@ -736,14 +903,15 @@ export default {
       const pubBytes = Buffer.from(data.publicKey, "base64");
       const wallet = Wallet.fromKeys(privBytes, pubBytes, provider);
 
-      const tokenAddr = data.fromTokenValue === "Q" ? SWAP_WQ_CONTRACT_ADDRESS : data.fromTokenValue;
+      const release = resolveSwapReleaseAddresses(data);
+      const tokenAddr = mapSwapTokenValue(data.fromTokenValue, release);
       const decimals = typeof data.fromDecimals === "number" ? data.fromDecimals : 18;
       const amountWei = parseUnits(normalizeAmountString(data.amount), decimals);
       const gasLimit = Number(data.gasLimit) || 84000;
 
       const token = IERC20.connect(getAddress(tokenAddr), wallet);
       const tx = await token.approve(
-        getAddress(SWAP_ROUTER_V2_CONTRACT_ADDRESS),
+        getAddress(release.router),
         amountWei,
         signingOverrides(wallet, data, { gasLimit }),
       );
@@ -770,10 +938,15 @@ export default {
       const pubBytes = Buffer.from(data.publicKey, "base64");
       const wallet = Wallet.fromKeys(privBytes, pubBytes, provider);
 
-      const router = QuantumSwapV2Router02.connect(SWAP_ROUTER_V2_CONTRACT_ADDRESS, wallet);
-      const fromAddr = data.fromTokenValue === "Q" ? SWAP_WQ_CONTRACT_ADDRESS : data.fromTokenValue;
-      const toAddr = data.toTokenValue === "Q" ? SWAP_WQ_CONTRACT_ADDRESS : data.toTokenValue;
-      const path = [getAddress(fromAddr), getAddress(toAddr)];
+      const release = resolveSwapReleaseAddresses(data);
+      const router = QuantumSwapV2Router02.connect(release.router, wallet);
+      const path = await resolveSwapPath(
+        provider,
+        chainId,
+        data.fromTokenValue,
+        data.toTokenValue,
+        release,
+      );
       const fromDecimals = typeof data.fromDecimals === "number" ? data.fromDecimals : 18;
       const toDecimals = typeof data.toDecimals === "number" ? data.toDecimals : 18;
       const deadline = await getSwapTxDeadline(provider, 1200);
@@ -826,12 +999,13 @@ export default {
       const pubBytes = Buffer.from(data.publicKey, "base64");
       const wallet = Wallet.fromKeys(privBytes, pubBytes, provider);
 
-      const tokenAddr = data.fromTokenValue === "Q" ? SWAP_WQ_CONTRACT_ADDRESS : data.fromTokenValue;
+      const release = resolveSwapReleaseAddresses(data);
+      const tokenAddr = mapSwapTokenValue(data.fromTokenValue, release);
       const gasLimit = Number(data.gasLimit) || 84000;
 
       const token = IERC20.connect(getAddress(tokenAddr), wallet);
       const tx = await token.approve(
-        getAddress(SWAP_ROUTER_V2_CONTRACT_ADDRESS),
+        getAddress(release.router),
         0n,
         signingOverrides(wallet, data, { gasLimit }),
       );
@@ -856,165 +1030,21 @@ export default {
       const pubBytes = Buffer.from(data.publicKey, "base64");
       const wallet = Wallet.fromKeys(privBytes, pubBytes, provider);
 
-      const tokenAddr = data.fromTokenValue === "Q" ? SWAP_WQ_CONTRACT_ADDRESS : data.fromTokenValue;
+      const release = resolveSwapReleaseAddresses(data);
+      const tokenAddr = mapSwapTokenValue(data.fromTokenValue, release);
       const decimals = typeof data.fromDecimals === "number" ? data.fromDecimals : 18;
       const amountWei = parseUnits(normalizeAmountString(data.amount), decimals);
       const gasLimit = Number(data.gasLimit) || 84000;
 
       const token = IERC20.connect(getAddress(tokenAddr), wallet);
       const tx = await token.approve(
-        getAddress(SWAP_ROUTER_V2_CONTRACT_ADDRESS),
+        getAddress(release.router),
         amountWei,
         signingOverrides(wallet, data, { gasLimit }),
       );
       return { success: true, txHash: tx.hash, error: null };
     } catch (err) {
       return { success: false, txHash: null, error: sanitizeSwapError(err) };
-    }
-  },
-
-  async OfflineSignCoinTransaction(data) {
-    try {
-      if (!data.privateKey || !data.publicKey)
-        return { success: false, txData: null, error: "Wallet keys required" };
-      if (!data.toAddress) return { success: false, txData: null, error: "Recipient address required" };
-      const chainId = Number(data.chainId);
-      if (!Number.isInteger(chainId)) return { success: false, txData: null, error: "Invalid chain ID" };
-      const nonce = Number(data.nonce);
-      if (!Number.isInteger(nonce) || nonce < 0)
-        return { success: false, txData: null, error: "Invalid nonce" };
-
-      await Initialize(null);
-      const privBytes = Buffer.from(data.privateKey, "base64");
-      const pubBytes = Buffer.from(data.publicKey, "base64");
-      const wallet = Wallet.fromKeys(privBytes, pubBytes);
-
-      const valueWei = parseUnits(normalizeAmountString(data.amount), 18);
-      const gasLimit = Number(data.gasLimit) || 21000;
-
-      const txData = await wallet.signTransaction(
-        signingOverrides(wallet, data, {
-          to: getAddress(data.toAddress),
-          value: valueWei,
-          nonce: nonce,
-          chainId: chainId,
-          gasLimit: gasLimit,
-        }),
-      );
-      return { success: true, txData: txData, error: null };
-    } catch (err) {
-      return { success: false, txData: null, error: err && err.message ? err.message : String(err) };
-    }
-  },
-
-  async OfflineSignTokenTransaction(data) {
-    try {
-      if (!data.privateKey || !data.publicKey)
-        return { success: false, txData: null, error: "Wallet keys required" };
-      if (!data.toAddress) return { success: false, txData: null, error: "Recipient address required" };
-      if (!data.contractAddress)
-        return { success: false, txData: null, error: "Token contract address required" };
-      const chainId = Number(data.chainId);
-      if (!Number.isInteger(chainId)) return { success: false, txData: null, error: "Invalid chain ID" };
-      const nonce = Number(data.nonce);
-      if (!Number.isInteger(nonce) || nonce < 0)
-        return { success: false, txData: null, error: "Invalid nonce" };
-
-      await Initialize(null);
-      const privBytes = Buffer.from(data.privateKey, "base64");
-      const pubBytes = Buffer.from(data.publicKey, "base64");
-      const wallet = Wallet.fromKeys(privBytes, pubBytes);
-
-      const decimals = typeof data.fromDecimals === "number" ? data.fromDecimals : 18;
-      const amountWei = parseUnits(normalizeAmountString(data.amount), decimals);
-      const gasLimit = Number(data.gasLimit) || 84000;
-
-      const token = IERC20.connect(getAddress(data.contractAddress), wallet);
-      const txReq = await token.populateTransaction.transfer(
-        getAddress(data.toAddress),
-        amountWei,
-        signingOverrides(wallet, data, { gasLimit }),
-      );
-
-      const txData = await wallet.signTransaction(
-        signingOverrides(wallet, data, {
-          ...txReq,
-          nonce: nonce,
-          chainId: chainId,
-        }),
-      );
-      return { success: true, txData: txData, error: null };
-    } catch (err) {
-      return { success: false, txData: null, error: err && err.message ? err.message : String(err) };
-    }
-  },
-
-  async StakingContractSubmit(data) {
-    try {
-      if (!data.method || !STAKING_ALLOWED_METHODS.includes(data.method))
-        return { success: false, txHash: null, error: "Invalid staking method" };
-      if (!data.privateKey || !data.publicKey)
-        return { success: false, txHash: null, error: "Wallet keys required" };
-      const chainId = Number(data.chainId);
-      if (!Number.isInteger(chainId)) return { success: false, txHash: null, error: "Invalid chain ID" };
-
-      const provider = createQuantumRpcProvider(data.rpcEndpoint, chainId);
-      if (!provider) return { success: false, txHash: null, error: "Invalid RPC endpoint" };
-
-      await Initialize(new Config(chainId, initRpcUrlForConfig(data.rpcEndpoint)));
-      const privBytes = Buffer.from(data.privateKey, "base64");
-      const pubBytes = Buffer.from(data.publicKey, "base64");
-      const wallet = Wallet.fromKeys(privBytes, pubBytes, provider);
-
-      const contract = new Contract(STAKING_CONTRACT_ADDRESS, STAKING_ABI_JSON, wallet);
-      const methodArgs = prepareStakingMethodArgs(STAKING_ABI_JSON, data.method, data.methodArgs);
-      const gasLimit = Number(data.gasLimit) || 250000;
-      const overrides = signingOverrides(wallet, data, { gasLimit });
-      if (data.value && data.value !== "0" && data.value !== "0.0") {
-        overrides.value = parseUnits(normalizeAmountString(data.value), 18);
-      }
-      methodArgs.push(overrides);
-
-      const tx = await contract[data.method](...methodArgs);
-      return { success: true, txHash: tx.hash, error: null };
-    } catch (err) {
-      return { success: false, txHash: null, error: err && err.message ? err.message : String(err) };
-    }
-  },
-
-  async StakingContractOfflineSign(data) {
-    try {
-      if (!data.method || !STAKING_ALLOWED_METHODS.includes(data.method))
-        return { success: false, txData: null, error: "Invalid staking method" };
-      if (!data.privateKey || !data.publicKey)
-        return { success: false, txData: null, error: "Wallet keys required" };
-      const chainId = Number(data.chainId);
-      if (!Number.isInteger(chainId)) return { success: false, txData: null, error: "Invalid chain ID" };
-      const nonce = Number(data.nonce);
-      if (!Number.isInteger(nonce) || nonce < 0)
-        return { success: false, txData: null, error: "Invalid nonce" };
-
-      await Initialize(null);
-      const privBytes = Buffer.from(data.privateKey, "base64");
-      const pubBytes = Buffer.from(data.publicKey, "base64");
-      const wallet = Wallet.fromKeys(privBytes, pubBytes);
-
-      const contract = new Contract(STAKING_CONTRACT_ADDRESS, STAKING_ABI_JSON, wallet);
-      const methodArgs = prepareStakingMethodArgs(STAKING_ABI_JSON, data.method, data.methodArgs);
-      const gasLimit = Number(data.gasLimit) || 250000;
-      const overrides = signingOverrides(wallet, data, { gasLimit });
-      if (data.value && data.value !== "0" && data.value !== "0.0") {
-        overrides.value = parseUnits(normalizeAmountString(data.value), 18);
-      }
-      methodArgs.push(overrides);
-
-      const txReq = await contract.populateTransaction[data.method](...methodArgs);
-      const txData = await wallet.signTransaction(
-        signingOverrides(wallet, data, { ...txReq, nonce: nonce, chainId: chainId }),
-      );
-      return { success: true, txData: txData, error: null };
-    } catch (err) {
-      return { success: false, txData: null, error: err && err.message ? err.message : String(err) };
     }
   },
 
@@ -1257,8 +1287,9 @@ export default {
       if (!provider) return { success: false, dataHex: null, error: "Invalid RPC endpoint" };
 
       await Initialize(new Config(chainId, initRpcUrlForConfig(data.rpcEndpoint)));
-      const tokenAddr = data.fromTokenValue === "Q" ? SWAP_WQ_CONTRACT_ADDRESS : data.fromTokenValue;
-      const spenderAddr = SWAP_ROUTER_V2_CONTRACT_ADDRESS;
+      const release = resolveSwapReleaseAddresses(data);
+      const tokenAddr = mapSwapTokenValue(data.fromTokenValue, release);
+      const spenderAddr = release.router;
       const decimals = typeof data.fromDecimals === "number" ? data.fromDecimals : 18;
       const amountWei = parseUnits(normalizeAmountString(data.amount), decimals);
 

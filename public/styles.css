@@ -30,6 +30,25 @@ button, input[type="submit"], input[type="reset"] {
     box-shadow: 5px 5px 7px rgba(0, 0, 0, 0.3);
 }
 
+/* Standout warning strip shown above the logo whenever a non-built-in swap
+   release is active (see updateCustomReleaseBanner in js/app.js). */
+.custom-release-banner {
+    width: 100%;
+    box-sizing: border-box;
+    background: #ff9800;
+    color: #1a1a1a;
+    font-weight: 700;
+    font-size: 13px;
+    letter-spacing: 0.06em;
+    text-align: center;
+    text-transform: uppercase;
+    padding: 4px 8px;
+    border-bottom: 2px solid #b26500;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
 .logo,
 .logo * {
     box-sizing: border-box;

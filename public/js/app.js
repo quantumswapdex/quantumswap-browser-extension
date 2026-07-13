@@ -66,7 +66,6 @@ function getBlockchainNetworkRowTemplate() {
     return blockchainNetworkRowTemplate || "";
 }
 const DROPDOWN_TEXT = "&#x25BC;";
-const DEFAULT_OFFLINE_TXN_SIGNING_SETTING_KEY = "DefaultOfflineTxnSigningSettingKey";
 const DEFAULT_ADVANCED_SIGNING_SETTING_KEY = "DefaultAdvancedSigningSettingKey";
 const maxTokenNameLength = 25;
 const maxTokenSymbolLength = 6;
@@ -99,7 +98,6 @@ let currentWalletRecognizedTokens = [];
 let currentWalletUnrecognizedTokens = [];
 let showingUnrecognizedTokens = false;
 let currentAccountDetails = null;
-let offlineSignEnabled = false;
 
 function checkDuplicateIds() {
     var nodes = document.querySelectorAll('[id]');
@@ -285,6 +283,44 @@ async function resumePostEula() {
 
     await blockchainNetworksInit();
     await showBlockchainNetworks();
+
+    await swapReleasesInit();
+    await refreshCurrentSwapRelease();
+}
+
+// Load the active release into the currentSwapRelease global (release.js) and
+// refresh the custom-release banner. Called at boot and after every add/switch.
+async function refreshCurrentSwapRelease() {
+    let releaseMap = await swapReleasesList();
+    let defaultIndex = await swapReleaseGetDefaultIndex();
+    const sortedKeys = [...releaseMap.keys()].sort((a, b) => a - b);
+    if (sortedKeys.length > 0 && !releaseMap.has(defaultIndex)) {
+        defaultIndex = sortedKeys[0];
+        await swapReleaseSetDefaultIndex(defaultIndex);
+    }
+    currentSwapRelease = releaseMap.get(defaultIndex) || null;
+    updateCustomReleaseBanner();
+}
+
+// Standout banner above the logo, shown only when the active release is not a
+// built-in one. The name is user/storage data: it was validated on add, but is
+// re-checked here and rendered via textContent only; on failure the banner
+// falls back to a generic label instead of the name.
+function updateCustomReleaseBanner() {
+    var banner = document.getElementById("divCustomReleaseBanner");
+    if (!banner) return;
+    if (!currentSwapRelease || currentSwapRelease.builtin === true) {
+        banner.textContent = "";
+        banner.style.display = "none";
+        return;
+    }
+    var prefix = (langJson && langJson.langValues && langJson.langValues["custom-release-banner-prefix"]) || "Custom release: ";
+    var name = String(currentSwapRelease.name || "");
+    if (name === "" || htmlEncode(name) !== name || containsUnsafeDisplayText(name)) {
+        name = "(unnamed)";
+    }
+    banner.textContent = prefix + name;
+    banner.style.display = "block";
 }
 
 async function showBlockchainNetworks() {
@@ -919,12 +955,10 @@ async function showWalletScreen() {
     document.getElementById('settings-content').style.display = 'none';
     document.getElementById('wallets-content').style.display = 'none';
     document.getElementById('SendScreen').style.display = 'none';
-    document.getElementById('OfflineSignScreen').style.display = 'none';
     document.getElementById('SwapScreen').style.display = 'none';
     document.getElementById('ReceiveScreen').style.display = 'none';
     document.getElementById('TransactionsScreen').style.display = 'none';
     document.getElementById('backupWalletScreen').style.display = 'none';
-    document.getElementById('ValidatorScreen').style.display = 'none';
 
     document.getElementById('main-content').style.display = 'block';
     document.getElementById('divMainContent').style.display = 'block';
@@ -1497,8 +1531,9 @@ function showSettingsScreen() {
     document.getElementById('revealSeedScreen').style.display = "none";
     document.getElementById('backupSpecificWalletScreen').style.display = "none";
     document.getElementById('networkListScreen').style.display = "none";
+    document.getElementById('releaseListScreen').style.display = "none";
+    document.getElementById('releaseAddScreen').style.display = "none";
     document.getElementById('divNetworkDropdown').style.display = 'none';
-    document.getElementById('ValidatorScreen').style.display = "none";
 
     document.getElementById('settings-content').style.display = "block";
     document.getElementById('settingsScreen').style.display = "block";
@@ -1506,11 +1541,11 @@ function showSettingsScreen() {
     return false;
 }
 
-// Enable/disable the burger menu's Wallets and Settings entries. They stay
-// grayed out (via the .disabled class) until a wallet is unlocked. The surface
-// controls (Pop out / Dock / Full screen) are never gated.
+// Enable/disable the burger menu's Wallets, Settings and Releases entries. They
+// stay grayed out (via the .disabled class) until a wallet is unlocked. The
+// surface controls (Pop out / Dock / Full screen) are never gated.
 function setWalletMenuEnabled(enabled) {
-    ['tab1', 'tab4'].forEach(function (id) {
+    ['tab1', 'tab4', 'tab5'].forEach(function (id) {
         var el = document.getElementById(id);
         if (!el) return;
         if (enabled) {
@@ -1651,6 +1686,137 @@ async function checkAndAddNetwork() {
     }
     catch (error) {
         showWarnAlert(langJson.errors.invalidNetworkJson + " " + error);
+    }
+}
+
+// ---- Swap releases (burger menu > Releases) ----
+
+async function showReleasesScreen() {
+    document.getElementById('gradient').style.height = '116px';
+    document.getElementById('login-content').style.display = "none";
+    document.getElementById('main-content').style.display = "none";
+    document.getElementById('wallets-content').style.display = "none";
+    document.getElementById('WalletsScreen').style.display = "none";
+    document.getElementById('revealSeedScreen').style.display = "none";
+    document.getElementById('backupSpecificWalletScreen').style.display = "none";
+    document.getElementById('settingsScreen').style.display = "none";
+    document.getElementById('networkListScreen').style.display = "none";
+    document.getElementById('networkAddScreen').style.display = "none";
+    document.getElementById('divNetworkDropdown').style.display = 'none';
+
+    document.getElementById('settings-content').style.display = "block";
+    document.getElementById('releaseListScreen').style.display = "block";
+    document.getElementById('releaseAddScreen').style.display = "none";
+    await showSwapReleasesTable();
+    return false;
+}
+
+// Rows are built with createElement/textContent only: name and addresses are
+// storage-backed (user-entered) data and must never reach innerHTML.
+async function showSwapReleasesTable() {
+    let releaseMap = await swapReleasesList();
+    let defaultIndex = await swapReleaseGetDefaultIndex();
+    let tbody = document.getElementById("tbodyReleaseRow");
+    tbody.textContent = "";
+    const sortedEntries = [...releaseMap.entries()].sort((a, b) => a[0] - b[0]);
+    const lv = (langJson && langJson.langValues) || {};
+    for (const [index, releaseItem] of sortedEntries) {
+        let tr = document.createElement("tr");
+
+        let tdActive = document.createElement("td");
+        tdActive.style.textAlign = "center";
+        tdActive.textContent = (index === defaultIndex) ? "\u2713" : "";
+        tr.appendChild(tdActive);
+
+        let tdName = document.createElement("td");
+        tdName.textContent = releaseItem.name;
+        tr.appendChild(tdName);
+
+        for (const addr of [releaseItem.wq, releaseItem.factory, releaseItem.router]) {
+            let td = document.createElement("td");
+            td.textContent = getShortAddress(String(addr));
+            td.title = String(addr);
+            tr.appendChild(td);
+        }
+
+        let tdUse = document.createElement("td");
+        if (index !== defaultIndex) {
+            let useLink = document.createElement("a");
+            useLink.href = "#";
+            useLink.textContent = lv["use"] || "Use";
+            useLink.addEventListener("click", (function (idx) {
+                return function (ev) {
+                    ev.preventDefault();
+                    useRelease(idx);
+                    return false;
+                };
+            })(index));
+            tdUse.appendChild(useLink);
+        }
+        tr.appendChild(tdUse);
+
+        tbody.appendChild(tr);
+    }
+}
+
+// Switch the active release: persist the new default index, reload
+// currentSwapRelease + banner, and reset any in-progress swap state so nothing
+// quoted under the previous release survives.
+async function useRelease(index) {
+    try {
+        await swapReleaseSetDefaultIndex(index);
+        await refreshCurrentSwapRelease();
+        resetSwapScreenStateForReleaseChange();
+        await showSwapReleasesTable();
+    }
+    catch (error) {
+        showWarnAlert(String((error && error.message) ? error.message : error));
+    }
+}
+
+function resetSwapScreenStateForReleaseChange() {
+    var fromQty = document.getElementById("txtSwapFromQuantity");
+    var toQty = document.getElementById("txtSwapToQuantity");
+    if (fromQty) fromQty.value = "";
+    if (toQty) toQty.value = "";
+    updateSwapRoutePathDisplay(null);
+}
+
+function showAddReleaseScreen() {
+    document.getElementById('releaseListScreen').style.display = "none";
+    document.getElementById('releaseAddScreen').style.display = "block";
+    document.getElementById('txtReleaseName').value = "";
+    document.getElementById('txtReleaseWq').value = "";
+    document.getElementById('txtReleaseFactory').value = "";
+    document.getElementById('txtReleaseRouter').value = "";
+    document.getElementById('txtReleaseName').focus();
+    return false;
+}
+
+function addRelease() {
+    const lv = langJson.langValues;
+    let name = (document.getElementById("txtReleaseName").value || "").trim();
+    let details = "";
+    if (name !== "" && htmlEncode(name) === name && !containsUnsafeDisplayText(name)) {
+        details = "\n\n" + (lv.addReleaseNewPrefix || "New release : ") + name;
+    }
+    let msg = lv.addReleaseWarn + details;
+    showConfirmAndExecuteOnConfirm(msg, checkAndAddRelease);
+}
+
+async function checkAndAddRelease() {
+    try {
+        let name = (document.getElementById("txtReleaseName").value || "").trim();
+        let wq = (document.getElementById("txtReleaseWq").value || "").trim();
+        let factory = (document.getElementById("txtReleaseFactory").value || "").trim();
+        let router = (document.getElementById("txtReleaseRouter").value || "").trim();
+
+        await swapReleaseAddNew(name, wq, factory, router);
+
+        showAlertAndExecuteOnClose(langJson.langValues.releaseAdded, showReleasesScreen);
+    }
+    catch (error) {
+        showWarnAlert(langJson.errors.invalidRelease + " " + error);
     }
 }
 
@@ -2047,14 +2213,14 @@ async function updateSwapFromAllowanceDisplay() {
         return;
     }
     try {
-        var allowancePayload = {
+        var allowancePayload = applySwapReleaseToPayload({
             rpcEndpoint: currentBlockchainNetwork.rpcEndpoint,
             chainId: parseInt(currentBlockchainNetwork.networkId, 10),
             fromTokenValue: fromValue,
             ownerAddress: currentWalletAddress,
             requiredAmount: "0",
             fromDecimals: getSwapTokenDecimals(fromValue)
-        };
+        });
         var result = await getSwapCheckAllowance(allowancePayload);
         if (!result || !result.success || !result.allowance) {
             row.style.display = "none";
@@ -2209,6 +2375,92 @@ function getSwapCachedSymbol(value) {
     return swapTokenSymbolCache[value] != null ? swapTokenSymbolCache[value] : getSwapSymbolFromValue(value);
 }
 
+// Stamp the active release's contract addresses onto a swap bridge payload
+// (releaseWq / releaseFactory / releaseRouter). The chain handlers fall back to
+// the built-in release when the fields are absent, so a not-yet-loaded
+// currentSwapRelease is safe. Returns the payload for chaining.
+function applySwapReleaseToPayload(payload) {
+    if (!payload) return payload;
+    if (currentSwapRelease != null) {
+        payload.releaseWq = currentSwapRelease.wq;
+        payload.releaseFactory = currentSwapRelease.factory;
+        payload.releaseRouter = currentSwapRelease.router;
+    }
+    return payload;
+}
+
+// ---- Multi-hop swap route display ----
+// Current route as returned by the route check: array of { address, symbol }.
+var swapCurrentRoute = null;
+var SWAP_ROUTE_SYMBOL_MAX_LENGTH = 12;
+
+// Sanitize an untrusted token symbol for display: strip spoofing Unicode
+// (bidi/zero-width/control, same set as containsUnsafeDisplayText) and
+// HTML-special characters (harmless via textContent, removed for defense in
+// depth), then cap the length. Returns "" when nothing displayable remains.
+function sanitizeSwapSymbolForDisplay(raw) {
+    if (raw == null) return "";
+    var s = String(raw)
+        .replace(/[\u202A-\u202E\u2066-\u2069\u200B-\u200D\u2060\uFEFF\u0000-\u001F\u007F-\u009F]/g, "")
+        .replace(/[<>&"'`]/g, "");
+    return s.substring(0, SWAP_ROUTE_SYMBOL_MAX_LENGTH).trim();
+}
+
+// Display text for one route token. Prefers the wallet's own (already filtered)
+// symbol; otherwise the on-chain symbol returned by the route check. Both are
+// untrusted, so the value is sanitized (spoofing/HTML-special characters
+// stripped, length-capped); only when no displayable symbol remains does the
+// shortened contract address appear. Rendered via textContent only.
+function getSwapRouteDisplaySymbol(address, symbol) {
+    var addrLower = String(address || "").toLowerCase();
+    var candidate = null;
+    if (currentWalletTokenList != null) {
+        for (var i = 0; i < currentWalletTokenList.length; i++) {
+            var t = currentWalletTokenList[i];
+            if (t.contractAddress && String(t.contractAddress).toLowerCase() === addrLower && t.symbol) {
+                candidate = t.symbol;
+                break;
+            }
+        }
+    }
+    if (candidate == null && symbol != null) candidate = symbol;
+    var s = sanitizeSwapSymbolForDisplay(candidate);
+    if (s !== "") return s;
+    var addr = String(address || "");
+    return addr.length >= 12 ? addr.substring(0, 6) + "..." + addr.slice(-4) : addr;
+}
+
+function updateSwapRoutePathDisplay(route) {
+    swapCurrentRoute = (route && route.length >= 2) ? route : null;
+    var container = document.getElementById("divSwapRoutePath");
+    var span = document.getElementById("spanSwapRoutePath");
+    if (!container || !span) return;
+    if (!swapCurrentRoute) {
+        span.textContent = "";
+        container.style.display = "none";
+        return;
+    }
+    var parts = [];
+    for (var i = 0; i < swapCurrentRoute.length; i++) {
+        parts.push(getSwapRouteDisplaySymbol(swapCurrentRoute[i].address, swapCurrentRoute[i].symbol));
+    }
+    span.textContent = parts.join(" -> ");
+    container.style.display = "block";
+}
+
+// Build the { address, symbol } route list from a SwapQuoteCheckPairExists result.
+function buildSwapRouteFromCheckResult(result) {
+    if (!result || result.exists !== true || !result.path || result.path.length < 2) return null;
+    var route = [];
+    for (var i = 0; i < result.path.length; i++) {
+        route.push({
+            address: result.path[i],
+            symbol: (result.pathSymbols && result.pathSymbols[i] != null) ? result.pathSymbols[i] : null
+        });
+    }
+    return route;
+}
+
 var swapQuantityUpdating = false;
 var swapQuoteFromDebounceId = null;
 var swapLastChanged = 'from'; // 'from' | 'to' - which quantity the user last edited
@@ -2271,7 +2523,7 @@ async function updateToQuantityFromFrom() {
     swapQuantityUpdating = true;
     showSwapQuoteLoading(true);
     try {
-        var payload = {
+        var payload = applySwapReleaseToPayload({
             rpcEndpoint: currentBlockchainNetwork.rpcEndpoint,
             chainId: parseInt(currentBlockchainNetwork.networkId, 10) || 123123,
             amountIn: fromQtyStr,
@@ -2279,7 +2531,7 @@ async function updateToQuantityFromFrom() {
             toTokenValue: toValue,
             fromDecimals: getSwapTokenDecimals(fromValue),
             toDecimals: getSwapTokenDecimals(toValue)
-        };
+        });
         var result = await getSwapQuoteAmountsOut(payload);
         if (result && result.success && result.amountOut != null) {
             var outStr = String(result.amountOut).replace(/\.?0+$/, "") || result.amountOut;
@@ -2328,7 +2580,7 @@ async function updateFromQuantityFromTo() {
     swapQuantityUpdating = true;
     showSwapQuoteLoading(true);
     try {
-        var payload = {
+        var payload = applySwapReleaseToPayload({
             rpcEndpoint: currentBlockchainNetwork.rpcEndpoint,
             chainId: parseInt(currentBlockchainNetwork.networkId, 10),
             amountOut: toQtyStr,
@@ -2336,7 +2588,7 @@ async function updateFromQuantityFromTo() {
             toTokenValue: toValue,
             fromDecimals: getSwapTokenDecimals(fromValue),
             toDecimals: getSwapTokenDecimals(toValue)
-        };
+        });
         var result = await getSwapQuoteAmountsIn(payload);
         if (result && result.success && result.amountIn != null) {
             var inStr = String(result.amountIn).replace(/\.?0+$/, "") || result.amountIn;
@@ -2365,9 +2617,11 @@ function debouncedUpdateFromQuantityFromTo() {
 }
 
 async function updateSwapScreenInfo() {
-    // Runs when either "from" or "to" token dropdown is changed. Check pair and show same error if pair doesn't exist.
+    // Runs when either "from" or "to" token dropdown is changed. Find a swap route
+    // (direct pair or multi-hop) and show an error when no route exists.
     document.getElementById("txtSwapFromQuantity").value = "";
     document.getElementById("txtSwapToQuantity").value = "";
+    updateSwapRoutePathDisplay(null);
     updateSwapBalanceLabels();
     var fromValue = document.getElementById("ddlSwapFromToken").value;
     var toValue = document.getElementById("ddlSwapToToken").value;
@@ -2377,19 +2631,21 @@ async function updateSwapScreenInfo() {
     if (!currentBlockchainNetwork) return false;
     var pairExists = false;
     try {
-        var payload = {
+        var payload = applySwapReleaseToPayload({
             rpcEndpoint: currentBlockchainNetwork.rpcEndpoint,
             chainId: parseInt(currentBlockchainNetwork.networkId, 10) || 123123,
             fromTokenValue: fromValue,
             toTokenValue: toValue
-        };
+        });
         var result = await getSwapCheckPairExists(payload);
         pairExists = result && result.exists === true;
-        if (!pairExists) {
+        if (pairExists) {
+            updateSwapRoutePathDisplay(buildSwapRouteFromCheckResult(result));
+        } else {
             if (result && result.error) {
                 showWarnAlert(result.error);
             } else {
-                showWarnAlert((langJson && langJson.langValues && langJson.langValues["swap-no-pair"]) || "No pair has been created for these two tokens");
+                showWarnAlert((langJson && langJson.langValues && langJson.langValues["swap-no-pair"]) || "No swap route exists between these two tokens (max 3 hops)");
             }
             document.getElementById("txtSwapToQuantity").value = "";
         }
@@ -2410,7 +2666,6 @@ function openSwapScreen() {
     document.getElementById('divNetworkDropdown').style.display = 'none';
     document.getElementById('HomeScreen').style.display = 'none';
     document.getElementById('SendScreen').style.display = 'none';
-    document.getElementById('OfflineSignScreen').style.display = 'none';
     document.getElementById('SwapScreen').style.display = 'block';
     document.getElementById('ReceiveScreen').style.display = 'none';
     document.getElementById('TransactionsScreen').style.display = 'none';
@@ -2423,6 +2678,7 @@ function openSwapScreen() {
     populateSwapTokenDropdowns();
     document.getElementById("txtSwapFromQuantity").value = "";
     document.getElementById("txtSwapToQuantity").value = "";
+    updateSwapRoutePathDisplay(null);
     document.getElementById("txtSwapFromQuantity").focus();
     updateSwapBalanceLabels();
     resetCurrentGasConfig();
@@ -2488,7 +2744,7 @@ var swapApproveGasState = { gasLimit: null, gasFee: null, gasPriceWei: null, ove
 
 // item 5: derive a decimal-wei per-gas-unit price from a displayed fee (coins) and
 // gas limit, for the cases where the node didn't return an exact price (user
-// override / offline / RPC fallback). Returns null when it can't be computed.
+// override / RPC fallback). Returns null when it can't be computed.
 function computeGasPriceWei(gasFeeEth, gasLimit) {
     var fee = parseFloat(gasFeeEth);
     var gl = parseFloat(gasLimit);
@@ -2546,8 +2802,8 @@ function resetCurrentGasConfig(state) {
     s._token = gasEstimateToken;
 }
 
-// Compute the offline/default gas config from a hardcoded gas-limit constant.
-function applyOfflineGasConfig(defaultGasLimit, labelId, state) {
+// Compute the default gas config from a hardcoded gas-limit constant.
+function applyDefaultGasConfig(defaultGasLimit, labelId, state) {
     var s = state || currentGasConfig;
     var gasLimit = defaultGasLimit;
     var gasFee = (gasLimit * SWAP_GAS_FEE_RATE);
@@ -2582,12 +2838,14 @@ function buildEstimateGasPayload(ctx) {
     if (ctx.methodArgs) payload.methodArgs = ctx.methodArgs;
     if (ctx.value != null) payload.value = ctx.value;
     if (ctx.bufferPercent != null) payload.bufferPercent = ctx.bufferPercent;
+    // Swap-family estimates run against the active release's contracts.
+    if (ctx.txKind === "swap" || ctx.txKind === "approve") applySwapReleaseToPayload(payload);
     return payload;
 }
 
 // Schedule a debounced gas estimation. `ctxProvider` returns the tx context (or null to skip),
 // `iconId`/`labelId` identify the UI elements. `state` is the gas-state object to update
-// (defaults to the global currentGasConfig). Respects offline mode (no network lookup).
+// (defaults to the global currentGasConfig).
 // `onRpcError` (optional) is invoked once if the network gas-price lookup fails (RPC error).
 function scheduleGasEstimation(ctxProvider, iconId, labelId, state, onRpcError) {
     var s = state || currentGasConfig;
@@ -2614,17 +2872,6 @@ async function runGasEstimation(ctxProvider, iconId, labelId, state, onRpcError)
         s.gasLimit = null;
         s.gasFee = null;
         s.overridden = false;
-        return;
-    }
-
-    var offline = await offlineTxnSigningGetDefaultValue();
-    if (offline === true) {
-        // Offline: no network lookup. Use the hardcoded default for this tx kind.
-        if (ctx.defaultGasLimit) {
-            applyOfflineGasConfig(ctx.defaultGasLimit, labelId, state);
-        } else {
-            setGasIconPulse(iconId, false);
-        }
         return;
     }
 
@@ -2722,7 +2969,7 @@ async function runGasEstimation(ctxProvider, iconId, labelId, state, onRpcError)
 }
 
 // Open the Gas config dialog prefilled with the current values; on OK, override.
-// `ctxProvider` (optional) is used to gate the offline-default pre-apply: the default
+// `ctxProvider` (optional) is used to gate the default pre-apply: the default
 // fee is only applied when the tx context is valid (inputs present), so no fee is
 // shown before the required quantity/inputs have been entered.
 function onGasIconClick(labelId, state, ctxProvider) {
@@ -2730,7 +2977,7 @@ function onGasIconClick(labelId, state, ctxProvider) {
     if (s.gasLimit == null && typeof ctxProvider === "function") {
         var ctx = ctxProvider();
         if (ctx && ctx.txKind && ctx.defaultGasLimit) {
-            applyOfflineGasConfig(ctx.defaultGasLimit, labelId, state);
+            applyDefaultGasConfig(ctx.defaultGasLimit, labelId, state);
         }
     }
     showGasConfigDialog({
@@ -2775,7 +3022,7 @@ function resolveGasForTx(defaultGasLimit, state) {
     };
 }
 
-// Swap gas defaults (offline / network-failure fallbacks).
+// Swap gas defaults (network-failure fallbacks).
 var SWAP_DEFAULT_GAS = 200000;
 var APPROVE_DEFAULT_GAS = 84000;
 
@@ -2868,15 +3115,16 @@ async function onSwapNextClick() {
     if (!currentBlockchainNetwork) return false;
     var pairExists = false;
     try {
-        var payload = {
+        var payload = applySwapReleaseToPayload({
             rpcEndpoint: currentBlockchainNetwork.rpcEndpoint,
             chainId: parseInt(currentBlockchainNetwork.networkId, 10),
             fromTokenValue: fromValue,
             toTokenValue: toValue
-        };
+        });
         var result = await getSwapCheckPairExists(payload);
         pairExists = result && result.exists === true;
         if (!pairExists) {
+            updateSwapRoutePathDisplay(null);
             if (result && result.error) {
                 showWarnAlert(result.error);
             } else {
@@ -2884,6 +3132,7 @@ async function onSwapNextClick() {
             }
             return false;
         }
+        updateSwapRoutePathDisplay(buildSwapRouteFromCheckResult(result));
     } catch (e) {
         showWarnAlert((e && e.message) ? e.message : String(e));
         return false;
@@ -2891,14 +3140,14 @@ async function onSwapNextClick() {
     document.getElementById("divSwapScreenInner").style.display = "none";
     setSwapConfirmPanelLoading(true);
     try {
-        var allowancePayload = {
+        var allowancePayload = applySwapReleaseToPayload({
             rpcEndpoint: currentBlockchainNetwork.rpcEndpoint,
             chainId: parseInt(currentBlockchainNetwork.networkId, 10),
             fromTokenValue: fromValue,
             ownerAddress: currentWalletAddress,
             requiredAmount: fromQty,
             fromDecimals: getSwapTokenDecimals(fromValue)
-        };
+        });
         var allowanceResult = await getSwapCheckAllowance(allowancePayload);
         if (!allowanceResult || !allowanceResult.success) {
             showWarnAlert((allowanceResult && allowanceResult.error) ? allowanceResult.error : "Failed to check approval");
@@ -3011,14 +3260,14 @@ async function reloadSwapApprovalContext() {
     var fromQty = (document.getElementById("txtSwapFromQuantity").value || "").trim();
     if (!fromQty || !currentBlockchainNetwork) return;
     try {
-        var allowancePayload = {
+        var allowancePayload = applySwapReleaseToPayload({
             rpcEndpoint: currentBlockchainNetwork.rpcEndpoint,
             chainId: parseInt(currentBlockchainNetwork.networkId, 10),
             fromTokenValue: fromValue,
             ownerAddress: currentWalletAddress,
             requiredAmount: fromQty,
             fromDecimals: getSwapTokenDecimals(fromValue)
-        };
+        });
         var allowanceResult = await getSwapCheckAllowance(allowancePayload);
         if (allowanceResult && allowanceResult.success && allowanceResult.sufficient) {
             document.getElementById("divSwapSlippageRow").style.display = "block";
@@ -3063,7 +3312,7 @@ async function submitSwapTransaction(quantumWallet) {
     var resolvedGas = resolveGasForTx(SWAP_DEFAULT_GAS);
     var gas = parseInt(resolvedGas.gasLimit, 10);
     try {
-        var result = await submitSwapSwap({
+        var result = await submitSwapSwap(applySwapReleaseToPayload({
             rpcEndpoint: currentBlockchainNetwork.rpcEndpoint,
             chainId: parseInt(currentBlockchainNetwork.networkId, 10),
             fromTokenValue: fromValue,
@@ -3080,7 +3329,7 @@ async function submitSwapTransaction(quantumWallet) {
             gasLimit: gas,
             gasPriceWei: resolvedGas.gasPriceWei,
             advancedSigningEnabled: await advancedSigningGetDefaultValue()
-        });
+        }));
         if (!result || !result.success || !result.txHash) {
             setSwapConfirmPanelWaitingForApprovalTx(false);
             showWarnAlert((result && result.error) ? String(result.error) : (langJson.errors.transactionSubmissionFailed || "Transaction submission failed."));
@@ -3099,7 +3348,7 @@ async function submitRemoveAllowanceTransaction(quantumWallet) {
     var resolvedGas = resolveGasForTx(APPROVE_DEFAULT_GAS, swapApproveGasState);
     var gas = parseInt(resolvedGas.gasLimit, 10);
     try {
-        var result = await submitSwapRemoveAllowance({
+        var result = await submitSwapRemoveAllowance(applySwapReleaseToPayload({
             rpcEndpoint: currentBlockchainNetwork.rpcEndpoint,
             chainId: parseInt(currentBlockchainNetwork.networkId, 10),
             fromTokenValue: fromValue,
@@ -3108,7 +3357,7 @@ async function submitRemoveAllowanceTransaction(quantumWallet) {
             gasLimit: gas,
             gasPriceWei: resolvedGas.gasPriceWei,
             advancedSigningEnabled: await advancedSigningGetDefaultValue()
-        });
+        }));
         if (!result || !result.success || !result.txHash) {
             setRemoveAllowancePanelWaiting(false);
             showWarnAlert((result && result.error) ? String(result.error) : (langJson.errors.transactionSubmissionFailed || "Transaction submission failed."));
@@ -3140,7 +3389,7 @@ async function submitAddAllowanceTransaction(quantumWallet) {
         return;
     }
     try {
-        var result = await submitSwapAddAllowance({
+        var result = await submitSwapAddAllowance(applySwapReleaseToPayload({
             rpcEndpoint: currentBlockchainNetwork.rpcEndpoint,
             chainId: parseInt(currentBlockchainNetwork.networkId, 10),
             fromTokenValue: fromValue,
@@ -3151,7 +3400,7 @@ async function submitAddAllowanceTransaction(quantumWallet) {
             gasLimit: gas,
             gasPriceWei: resolvedGas.gasPriceWei,
             advancedSigningEnabled: await advancedSigningGetDefaultValue()
-        });
+        }));
         if (!result || !result.success || !result.txHash) {
             setAddAllowancePanelWaiting(false);
             showWarnAlert((result && result.error) ? String(result.error) : (langJson.errors.transactionSubmissionFailed || "Transaction submission failed."));
@@ -3317,26 +3566,27 @@ function showSwapApprovalTransactionReview(review, mode) {
     showTransactionReviewDialog(review);
 }
 
-function showValidatorTransactionReview(review, onConfirm) {
-    review.requirePassword = false;
-    review.assetLabelKey = "action";
-    review.submitLabelKey = "submit";
-    review.fromAddress = currentWalletAddress;
-    review.networkText = txReviewNetworkText();
-    review.contractAddress = (typeof STAKING_CONTRACT_ADDRESS !== "undefined") ? STAKING_CONTRACT_ADDRESS : "";
-    review.onSubmit = onConfirm;
-    showTransactionReviewDialog(review);
-}
-
 function showSwapExecuteConfirmDialog() {
     var fromValue = document.getElementById("ddlSwapFromToken").value;
     var toValue = document.getElementById("ddlSwapToToken").value;
     var fromAmt = (document.getElementById("txtSwapFromQuantity").value || "").trim();
     var toAmt = (document.getElementById("txtSwapToQuantity").value || "").trim();
-    function sym(v) { return v === "Q" ? "Q" : (String(v).length > 10 ? String(v).slice(0, 6) + "..." + String(v).slice(-4) : v); }
+    // Dropdown values are "Q" or a token contract address; show the (sanitized)
+    // token symbol, falling back to the shortened address only when no symbol
+    // is available.
+    function sym(v) { return v === "Q" ? "Q" : getSwapRouteDisplaySymbol(v, null); }
     var resolved = resolveGasForTx(SWAP_DEFAULT_GAS);
+    // Show the full multi-hop route when one was resolved, otherwise from -> to.
+    var assetText = sym(fromValue) + " -> " + sym(toValue);
+    if (swapCurrentRoute && swapCurrentRoute.length >= 2) {
+        var routeParts = [];
+        for (var ri = 0; ri < swapCurrentRoute.length; ri++) {
+            routeParts.push(getSwapRouteDisplaySymbol(swapCurrentRoute[ri].address, swapCurrentRoute[ri].symbol));
+        }
+        assetText = routeParts.join(" -> ");
+    }
     var review = {
-        asset: sym(fromValue) + " -> " + sym(toValue),
+        asset: assetText,
         contractAddress: getSwapContractAddress(fromValue),
         toAddress: currentWalletAddress,
         quantityLabelKey: "send-quantity",
@@ -3660,44 +3910,6 @@ async function openBlockExplorer() {
 function clickOnEnter(event, object) {
     if (event.keyCode == 13) {
         object.click();
-    }
-}
-
-async function offlineTxnSigningSetDefaultValue(value) {
-    let itemStoreResult = await storageSetItem(DEFAULT_OFFLINE_TXN_SIGNING_SETTING_KEY, value);
-    if (itemStoreResult != true) {
-        throw new Error("offlineTxnSigningSetDefaultValue item store failed");
-    }
-
-    return true;
-}
-
-async function offlineTxnSigningGetDefaultValue() {
-    let value = await storageGetItem(DEFAULT_OFFLINE_TXN_SIGNING_SETTING_KEY);
-    if (value == null) {
-        return false;
-    }
-
-    if (value === "enabled") {
-        return true;
-    }
-
-    return false;
-}
-
-async function saveSelectedOfflineTxnSigningSetting() {
-    const radioButtons = document.querySelectorAll('input[name="optOfflineTxnSigning"]');
-    let selectedValue = "";
-    radioButtons.forEach(function (radioButton) {
-        if (radioButton.checked) {
-            selectedValue = radioButton.value;
-        }
-    });
-    let result = await offlineTxnSigningSetDefaultValue(selectedValue);
-    if (result == false) {
-        showWarnAlert(getGenericError(""));
-    } else {
-        return;
     }
 }
 

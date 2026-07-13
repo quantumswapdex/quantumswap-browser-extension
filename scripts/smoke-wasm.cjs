@@ -45,8 +45,8 @@ require(path.join(__dirname, "..", "public", "platform-bridge.js"));
   const rnd = await window.CryptoApi.send("CryptoRandomBytes", 16);
   console.log("CryptoRandomBytes(16) -> base64 len", rnd.length);
 
-  // Heaviest WASM path: derive a post-quantum wallet from a seed, then sign an
-  // offline transaction (PQC signing runs entirely in WASM).
+  // Heaviest WASM path: derive a post-quantum wallet from a seed, then round-trip
+  // it through the encrypted-JSON keystore (PQC key handling runs entirely in WASM).
   const seed = Array.from({ length: 96 }, () => Math.floor(Math.random() * 256));
   const wallet = await window.CryptoApi.send("WalletFromSeed", { seed });
   console.log("WalletFromSeed -> address", wallet.address.slice(0, 12) + "...");
@@ -64,21 +64,8 @@ require(path.join(__dirname, "..", "public", "platform-bridge.js"));
     "Wallet encrypt/decrypt round trip ->",
     decrypted.address === wallet.address ? "address matches" : "MISMATCH",
   );
-
-  const signed = await window.SwapQuoteApi.send("OfflineSignCoinTransaction", {
-    privateKey: wallet.privateKey,
-    publicKey: wallet.publicKey,
-    toAddress: wallet.address,
-    amount: "1.5",
-    nonce: 0,
-    chainId: 123123,
-    gasLimit: 21000,
-  });
-  console.log(
-    "OfflineSignCoinTransaction ->",
-    signed.success ? "signed (" + String(signed.txData).slice(0, 14) + "...)" : "FAILED: " + signed.error,
-  );
-  if (!signed.success) throw new Error("offline signing failed: " + signed.error);
+  if (decrypted.address !== wallet.address)
+    throw new Error("wallet encrypt/decrypt round trip failed: address mismatch");
 
   console.log("\nWASM SMOKE TEST PASSED");
   process.exit(0);
