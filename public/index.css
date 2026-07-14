@@ -266,50 +266,10 @@
 }
 
 /* ---------- Seed screens ---------- */
-.seedrowheadplain {
-    color: var(--text);
-}
-
-.seedrowplain {
-    background-color: var(--glass);
-}
-
-/* The seed-group colors were tuned for a white background; brighten the ones
-   that vanish on dark (pure blue, dark maroon, petrol, indigo, black). */
-.seedrowhead1 {
-    color: #60a5fa;
-}
-
-.seedrowhead5 {
-    color: #fb7185;
-}
-
-.seedrow5 {
-    background-color: #9f1239;
-}
-
-.seedrowhead7 {
-    color: #38bdf8;
-}
-
-.seedrowhead8 {
-    color: #cbd5e1;
-}
-
-.seedrow8 {
-    background-color: #475569;
-}
-
-.seedrowhead9 {
-    color: #818cf8;
-}
-
-.seedrowhead12 {
-    color: #22d3ee;
-}
-
-.seedrow12 {
-    background-color: #155e75;
+/* The A1/B1/... word labels inherit dark colors from .seedrowheadN and are
+   unreadable on the dark background; force them white. Box colors untouched. */
+.seedCell > div:first-child {
+    color: #ffffff;
 }
 
 /* ---------- Gas toast ---------- */
@@ -330,12 +290,6 @@
 .acd-choice.selected {
     color: var(--accent-literal);
     font-weight: bold;
-}
-
-.entrybox {
-    background: var(--input-bg);
-    color: var(--text);
-    border: 1px solid var(--input-border);
 }
 
 .acd-choices::-webkit-scrollbar-track {
