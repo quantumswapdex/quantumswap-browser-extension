@@ -1224,9 +1224,12 @@
         // item 11: contract-creation deploys have opaque, unverified bytecode.
         show("dapp-deploy-warning", decoded.kind === "deploy");
         if (decoded.kind === "deploy") {
+            el("dappTxTargetLabel").textContent = "";
             el("dappTxTarget").textContent = t("dapp-contract-creation", "Contract creation");
         } else {
-            el("dappTxTarget").textContent = t("dapp-to", "To") + ": " + (decoded.to || "");
+            // Label kept in its own (non-bold) span; only the address is bold.
+            el("dappTxTargetLabel").textContent = t("dapp-to", "To") + ": ";
+            el("dappTxTarget").textContent = decoded.to || "";
         }
         el("dappTxValue").textContent = formatValueQ(decoded.valueDecimal);
         if (decoded.method) {

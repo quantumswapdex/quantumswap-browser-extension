@@ -232,7 +232,7 @@ function resizeBoxes() {
         maxHeightMiddle = "400px";
         tokensMaxHeight = "150px";
     } else if(screen.height >= 1024) {
-        maxHeight = "520px";
+        maxHeight = "560px";
         maxHeightMiddle = "550px";
         tokensMaxHeight = "295px";
     } else if(screen.height >= 960) {
@@ -971,7 +971,7 @@ async function showWalletScreen() {
     document.getElementById('ReceiveScreen').style.display = 'none';
     document.getElementById('TransactionsScreen').style.display = 'none';
 
-    document.getElementById('gradient').style.height = '224px';
+    document.getElementById('gradient').style.height = '200px';
     document.getElementById('walletAddress').textContent = currentWalletAddress;
 
     resizeBoxes();
@@ -1541,11 +1541,11 @@ function showSettingsScreen() {
     return false;
 }
 
-// Enable/disable the burger menu's Wallets, Settings and Releases entries. They
+// Enable/disable the burger menu's Wallets and Settings entries. They
 // stay grayed out (via the .disabled class) until a wallet is unlocked. The
 // surface controls (Pop out / Dock / Full screen) are never gated.
 function setWalletMenuEnabled(enabled) {
-    ['tab1', 'tab4', 'tab5'].forEach(function (id) {
+    ['tab1', 'tab4'].forEach(function (id) {
         var el = document.getElementById(id);
         if (!el) return;
         if (enabled) {
@@ -1689,7 +1689,7 @@ async function checkAndAddNetwork() {
     }
 }
 
-// ---- Swap releases (burger menu > Releases) ----
+// ---- Swap releases (Settings > Releases) ----
 
 async function showReleasesScreen() {
     document.getElementById('gradient').style.height = '116px';

@@ -10,11 +10,17 @@
     <link rel="stylesheet" href="styles.css">
     <link rel="stylesheet" href="lib/autocomplete/autocomplete.css">
     <link rel="stylesheet" href="popup.css">
+    <link rel="stylesheet" href="theme.css">
+    <link rel="stylesheet" href="index.css">
 
     <title>Title</title>
 </head>
 
 <body>
+<!-- Ambient background orbs (decorative, matches the web app's violet theme). -->
+<div class="qs-orb qs-orb-1"></div>
+<div class="qs-orb qs-orb-2"></div>
+
 <template id="tplBlockchainNetworkRow">
     <tr class="network-row">
         <td>[BLOCKCHAIN_NETWORK_ID]</td>
@@ -273,10 +279,6 @@
                     <img class="tab-icon" src="assets/svg/settings.svg" alt="Settings Icon">
                     <div class="tab-name" data-lang-key="settings">Settings</div>
                 </div>
-                <div class="burger-item disabled" id="tab5" role="button" tabindex="16" onclick="closeBurgerMenu(); return showReleasesScreen();">
-                    <img class="tab-icon" src="assets/svg/release-tag.svg" alt="Releases Icon">
-                    <div class="tab-name" data-lang-key="releases">Releases</div>
-                </div>
             </div>
         </div>
         <div class="dropdown" onclick="return showNetworkDialog();" id="divNetworkDropdown" role="button" tabindex="1000" style="display:none;">
@@ -302,14 +304,14 @@
                         <div class="divider"></div>
                         <div class="input_container">
                             <div class="heading medium" data-lang-key="enter-wallet-password">Password</div>
-                            <div style="width:100%;">
-                                <div style="float: left; width: 80%;">
+                            <div style="width:100%; display:flex; align-items:center; gap:10px;">
+                                <div style="flex:1; min-width:0;">
                                     <input class="tab-name"
                                            style="text-align: left; width: 100%; border: none; outline: none; font-weight: 500; color: black; letter-spacing: 0.11em;"
                                            type="password" autocomplete="off" id="pwdUnlock" name="password" data-placeholder-key="password"
                                            placeholder="Enter a password" tabindex="1" autofocus>
                                 </div>
-                                <div style="float:left">
+                                <div style="display:flex; align-items:center;">
                                     <img src="assets/svg/eye-outline.svg" alt="Show Password" style="cursor:pointer;width:20px;" onclick="togglePasswordBox(this, 'pwdUnlock');" data-alt-key="show-password" role="button" tabindex="2" />
                                 </div>
                             </div>
@@ -378,14 +380,14 @@
                         </div>
                         <div class="input_container">
                             <div class="heading medium" data-lang-key="password">Password</div>
-                            <div style="width:100%;">
-                                <div style="float: left; width: 80%;">
+                            <div style="width:100%; display:flex; align-items:center; gap:10px;">
+                                <div style="flex:1; min-width:0;">
                                     <input class="tab-name"
                                            style="text-align: left; width: 100%; border: none; outline: none; font-weight: 500; color: black; letter-spacing: 0.11em;"
                                            type="password" autocomplete="off" id="pwdPassword" name="password"
                                            placeholder="Enter a password" data-placeholder-key="enter-a-password" tabindex="1">
                                 </div>
-                                <div style="float:left">
+                                <div style="display:flex; align-items:center;">
                                     <img src="assets/svg/eye-outline.svg" alt="Show Password" style="cursor:pointer;width:20px;" onclick="togglePasswordBox(this, 'pwdPassword');" data-alt-key="show-password" role="button" tabindex="2" />
                                 </div>
                             </div>
@@ -393,14 +395,14 @@
                         </div>
                         <div class="input_container">
                             <div class="heading medium" data-lang-key="retype-password">Retype Password</div>
-                            <div style="width:100%;">
-                                <div style="float: left; width: 80%;">
+                            <div style="width:100%; display:flex; align-items:center; gap:10px;">
+                                <div style="flex:1; min-width:0;">
                                     <input class="tab-name"
                                            style="text-align: left; width: 100%; border: none; outline: none; font-weight: 500; color: black; letter-spacing: 0.11em;"
                                            type="password" autocomplete="off" id="pwdRetypePassword" name="password"
                                            placeholder="Retype the password" data-placeholder-key="retype-the-password" tabindex="3">
                                 </div>
-                                <div style="float:left">
+                                <div style="display:flex; align-items:center;">
                                     <img src="assets/svg/eye-outline.svg" alt="Show Password" style="cursor:pointer;width:20px;" onclick="togglePasswordBox(this, 'pwdRetypePassword');" data-alt-key="show-password" role="button" tabindex="4" />
                                 </div>
                             </div>
@@ -1286,14 +1288,14 @@
                         <div style="text-align:left;font-size:12px;color:green;" id="divRestoreWalletFilename"></div>
                         <div class="input_container">
                             <div class="heading medium" data-lang-key="enter-above-wallet-password">Enter the above wallet's password</div>
-                            <div style="width:100%;">
-                                <div style="float: left; width: 80%;">
+                            <div style="width:100%; display:flex; align-items:center; gap:10px;">
+                                <div style="flex:1; min-width:0;">
                                     <input class="tab-name"
                                            style="text-align: left; width: 100%; border: none; outline: none; font-weight: 500; color: black; letter-spacing: 0.11em;"
                                            type="password" autocomplete="off" id="pwdRestoreWallet" name="password" data-placeholder-key="password"
                                            placeholder="Enter the above wallet's password" tabindex="2">
                                 </div>
-                                <div style="float:left">
+                                <div style="display:flex; align-items:center;">
                                     <img src="assets/svg/eye-outline.svg" data-alt-key="show-password" alt="Show Password" style="cursor:pointer;width:20px;" onclick="togglePasswordBox(this, 'pwdRestoreWallet');" role="button" tabindex="3" />
                                 </div>
                             </div>
@@ -1367,14 +1369,14 @@
                                 Retype your wallet password, to verify that you remember it. Upon verification, your wallet will be saved.
                             </div>
                             <div class="divider"></div>
-                            <div style="width:100%;">
-                                <div style="float: left; width: 80%;">
+                            <div style="width:100%; display:flex; align-items:center; gap:10px;">
+                                <div style="flex:1; min-width:0;">
                                     <input class="tab-name"
                                            style="text-align: left; width: 100%; border: none; outline: none; font-weight: 500; color: black; letter-spacing: 0.11em;"
                                            type="password" autocomplete="off" id="pwdVerifyWalletPassword" name="password"
                                            placeholder="Enter wallet password" data-placeholder-key="password" tabindex="1">
                                 </div>
-                                <div style="float:left">
+                                <div style="display:flex; align-items:center;">
                                     <img src="assets/svg/eye-outline.svg" alt="Show Password" style="cursor:pointer;width:20px;" onclick="togglePasswordBox(this, 'pwdVerifyWalletPassword');" role="button" tabindex="2" />
                                 </div>
                             </div>
@@ -1441,25 +1443,25 @@
                         </div>
                         <div class="buttons-container">
                             <div class="buttonBox" onclick="showSendScreen();" role="button" tabindex="3">
-                                <div class="button" style="background: #FFB400 !important; border-radius: 10px; align-self: center; min-height: 50px; min-width: 50px; ">
+                                <div class="button" style="border-radius: 12px; align-self: center; min-height: 50px; min-width: 50px; ">
                                     <img src="assets/svg/arrow-up-outline.svg" alt="Send" style="width: 30px; height: 30px; position: relative; top: 50%; transform: translateY(-50%);">
                                 </div>
                                 <div class="button-name" data-lang-key="send">Send</div>
                             </div>
                             <div class="buttonBox" onclick="showReceiveScreen();" role="button" tabindex="4">
-                                <div class="button" style="background: #1DCC70 !important; border-radius: 10px; align-self: center; min-height: 50px; min-width: 50px; ">
+                                <div class="button" style="border-radius: 12px; align-self: center; min-height: 50px; min-width: 50px; ">
                                     <img src="assets/svg/arrow-down-outline.svg" alt="Receive" style="width: 30px; height: 30px; position: relative; top: 50%; transform: translateY(-50%);">
                                 </div>
                                 <div class="button-name" data-lang-key="receive" role="button">Receive</div>
                             </div>
                             <div class="buttonBox" onclick="showTransactionsScreen();" role="button" tabindex="5">
-                                <div class="button" style="background: #55D0F0 !important; border-radius: 10px; align-self: center; min-height: 50px; min-width: 50px; ">
+                                <div class="button" style="border-radius: 12px; align-self: center; min-height: 50px; min-width: 50px; ">
                                     <img src="assets/svg/txn-outline.svg" alt="Transactions" style="width: 30px; height: 30px; position: relative; top: 50%; transform: translateY(-50%);">
                                 </div>
                                 <div class="button-name" data-lang-key="transactions">Transactions</div>
                             </div>
                             <div class="buttonBox" onclick="showSwapScreen();" role="button" tabindex="6">
-                                <div class="button button-swap" style="border-radius: 10px; align-self: center; min-height: 50px; min-width: 50px; ">
+                                <div class="button button-swap" style="border-radius: 12px; align-self: center; min-height: 50px; min-width: 50px; ">
                                     <img src="assets/svg/dex-swap-outline.svg" alt="Swap" style="width: 30px; height: 30px; position: relative; top: 50%; transform: translateY(-50%);">
                                 </div>
                                 <div class="button-name" data-lang-key="swap">Swap</div>
@@ -1496,7 +1498,7 @@
                 </div>
             </div>
 
-            <div class="center-content home-content" id="SendScreen" style="margin-top:110px;">
+            <div class="center-content home-content" id="SendScreen" style="margin-top:62px;">
                 <div class="center-content-rounded-container">
                     <div class="back-container" role="button" onclick="showWalletScreen();" tabindex="300">
 
@@ -1547,14 +1549,14 @@
                             <div class="divider"></div>
                         </div>
                         <div class="input_container">
-                            <div style="width:100%;">
-                                <div style="float: left; width: 80%;">
+                            <div style="width:100%; display:flex; align-items:center; gap:10px;">
+                                <div style="flex:1; min-width:0;">
                                     <input class="tab-name"
                                            style="text-align: left; width: 100%; border: none; outline: none; font-weight: 500; color: black; letter-spacing: 0.11em;"
                                            type="password" autocomplete="off" id="pwdSend" name="password" data-placeholder-key="password"
                                            placeholder="Enter the password" tabindex="308">
                                 </div>
-                                <div style="float:left">
+                                <div style="display:flex; align-items:center;">
                                     <img src="assets/svg/eye-outline.svg" alt="Show Password" style="cursor:pointer;width:20px;" onclick="togglePasswordBox(this, 'pwdSend');" data-alt-key="show-password" role="button" tabindex="309" />
                                 </div>
                             </div>
@@ -1569,7 +1571,7 @@
                 </div>
             </div>
 
-            <div class="center-content home-content" id="SwapScreen" style="margin-top:110px;">
+            <div class="center-content home-content" id="SwapScreen" style="margin-top:62px;">
                 <div class="center-content-rounded-container" style="width:93%;">
                     <div class="back-container" role="button" onclick="onSwapScreenBackClick();" tabindex="320" id="divBackSwapScreen"></div>
                     <div id="divSwapScreenInner" class="roundex-box scrollbar" style="padding-top: 15px; padding-bottom: 15px; overflow-y: auto; overflow-x: auto;max-height:590px;">
@@ -1804,7 +1806,7 @@
                 </div>
             </div>
 
-            <div class="center-content home-content" id="TransactionsScreen" style="margin-top:110px;">
+            <div class="center-content home-content" id="TransactionsScreen" style="margin-top:62px;">
 
                 <div class="center-content-rounded-container" style="width:95%;max-width: 95%;">
                     <div style="display: flex; margin-bottom: 5px;">
@@ -1946,6 +1948,10 @@
                                     <a href="#" onclick="return showAdvancedSigningSettingDialog();" data-lang-key="signing" tabindex="4003">Signing</a>
                                 </div>
                                 <div class="divider"></div>
+                                <div class="vertical-menu-item">
+                                    <a href="#" onclick="return showReleasesScreen();" data-lang-key="releases" tabindex="4004">Releases</a>
+                                </div>
+                                <div class="divider"></div>
                             </div>
                         </div>
                     </div>
@@ -2027,7 +2033,7 @@
         <div class="content" id="releaseListScreen" style="display: none;">
             <div class="center-content">
                 <div class="center-content-rounded-container">
-                    <div class="back-container" role="button" onclick="showWalletScreen()" tabindex="3">
+                    <div class="back-container" role="button" onclick="showSettingsScreen()" tabindex="3">
 
                     </div>
                     <div class="roundex-box" style="padding-top: 15px; padding-bottom: 15px;">
@@ -2174,14 +2180,14 @@
                         <div style="width: fit-content; align-self: center;">
                             <div style="width:100%;text-align:left;" id="divRevealSeedHelp">
                                 <div class="heading medium" data-lang-key="enter-wallet-password">Enter Wallet Password</div>
-                                <div style="width:100%;">
-                                    <div style="float: left; width: 80%;">
+                                <div style="width:100%; display:flex; align-items:center; gap:10px;">
+                                    <div style="flex:1; min-width:0;">
                                         <input class="tab-name"
                                                style="text-align: left; width: 100%; border: none; outline: none; font-weight: 500; color: black; letter-spacing: 0.11em;"
                                                type="password" autocomplete="off" id="pwdRevealSeedScreenPassword" name="password" data-placeholder-key="password"
                                                placeholder="Enter the password" tabindex="1">
                                     </div>
-                                    <div style="float:left">
+                                    <div style="display:flex; align-items:center;">
                                         <img src="assets/svg/eye-outline.svg" alt="Show Password" style="cursor:pointer;width:20px;" onclick="togglePasswordBox(this, 'pwdRevealSeedScreenPassword');" role="button" tabindex="2" />
                                     </div>
                                 </div>
@@ -2458,14 +2464,14 @@
                         <div class="divider"></div>
                         <div class="input_container">
                             <div class="heading medium" data-lang-key="enter-wallet-password">Enter your wallet password</div>
-                            <div style="width:100%;">
-                                <div style="float: left; width: 80%;">
+                            <div style="width:100%; display:flex; align-items:center; gap:10px;">
+                                <div style="flex:1; min-width:0;">
                                     <input class="tab-name"
                                            style="text-align: left; width: 100%; border: none; outline: none; font-weight: 500; color: black; letter-spacing: 0.11em;"
                                            type="password" autocomplete="off" id="pwdBackupSpecificWallet" name="password"
                                            placeholder="Enter the password" data-placeholder-key="password" tabindex="1">
                                 </div>
-                                <div style="float:left">
+                                <div style="display:flex; align-items:center;">
                                     <img src="assets/svg/eye-outline.svg" alt="Show Password" data-alt-key="show-password" style="cursor:pointer;width:20px;" onclick="togglePasswordBox(this, 'pwdBackupSpecificWallet');" role="button" tabindex="2" />
                                 </div>
                             </div>
