@@ -1,12 +1,13 @@
 # QuantumSwap Browser Extension
 
-A Chrome + Firefox port of the QuantumSwap desktop wallet. It reuses the desktop
-app's **entire** UI (HTML/CSS/JS/assets) unchanged and re-homes the Electron
-"main process" IPC handlers into the extension popup, where the post-quantum
+A Chrome + Firefox port of the QuantumSwap desktop wallet. The renderer is a
+native TypeScript port of the desktop wallet's UI architecture (ScreenModule +
+`el()` DOM builder + core/impure split), and the Electron "main process" IPC
+handlers are re-homed into the extension pages, where the post-quantum
 WebAssembly SDK runs.
 
 - **Tooling:** [WXT](https://wxt.dev) (Manifest V3 for Chrome, MV2 for Firefox from a single codebase)
-- **UI surface:** toolbar popup (`action.default_popup`)
+- **UI surfaces:** side panel / sidebar (docked, default), toolbar popup, detached window and full tab — all served from the same `index.html`
 - **Crypto:** the Go-compiled post-quantum WASM from `quantum-coin-js-sdk` runs directly in the popup
 
 ## Table of contents
@@ -29,41 +30,48 @@ WebAssembly SDK runs.
 ## Architecture
 
 The desktop app has a clean split we exploit: the renderer only ever calls
-`SomeApi.send(channel, data)` / `StorageApi.Get/SetItem`, never Node directly. We
-keep every UI/renderer file byte-for-byte and replace only the transport + Node
-"main process" layer.
+`SomeApi.send(channel, data)` / `StorageApi.Get/SetItem`, never Node directly. The
+renderer is ported to the extension as native TypeScript (same screen modules,
+app controllers and lib layers as the desktop `src/`), and only the transport +
+Node "main process" layer is replaced.
 
 ```
-Electron (before)                     Extension (after)
------------------                     -----------------
-renderer js  --Api.send-->  preload   renderer js  --Api.send-->  platform-bridge.js
-             --ipc-->  index.js (Node)              --dispatch-->  handlers/* (browser + WASM)
+Electron (desktop)                     Extension
+------------------                     ---------
+renderer ts  --Api.send-->  preload    renderer ts  --Api.send-->  platform-bridge.js
+             --ipc-->  main (Node)                  --dispatch-->  handlers/* (browser + WASM)
 ```
 
-- `public/` — the desktop UI, copied verbatim (`index.html`, `styles.css`,
-  `js/**`, `lib/**`, `assets/**`, `json/**`). Served as the popup. It is **not**
-  processed by Vite; the plain global `<script>` files keep their shared scope.
+- `entrypoints/index/` — the wallet UI entry (`index.html` + `main.ts`
+  bootstrap mirroring the desktop `src/renderer.ts`). The same page serves all
+  four surfaces via `?view=panel|popup|window|tab`. `entrypoints/approve/` is
+  the dApp approval popup (`approve.html?requestId=...`).
+- `src/screens`, `src/dialogs`, `src/app`, `src/lib`, `src/ui` — the renderer,
+  ported from the desktop wallet: `el()`-built screen modules, per-domain app
+  controllers with pure `*-core.ts` logic, and the typed `lib/bridge.ts`
+  wrappers over the `*Api.send` surface.
+- `public/` — static assets only (`styles.css` + themes, fonts, icons,
+  `json/**`).
 - `public/platform-bridge.js` — **generated** by `scripts/build-bridge.mjs`
-  (esbuild). Loaded as the first `<script>` in `index.html`. It:
-  - recreates the globals the Electron `preload.js` exposed
+  (esbuild). Loaded as the first `<script>` in each entrypoint HTML. It:
+  - recreates the globals the Electron `preload.ts` exposed
     (`CryptoApi`, `SwapQuoteApi`, `FileApi`, `ClipboardApi`, `ShellApi`,
     `LocalStorageApi`, `FormatApi`, `AppApi`, `SeedWordsApi`, `StorageApi`),
   - routes every `*.send(channel, data)` to an in-page handler registry
-    (`src/bridge/dispatch.js`) instead of `ipcRenderer.invoke`,
+    (`src/platform/dispatch.ts`) instead of `ipcRenderer.invoke`,
   - bundles the SDKs (`quantumcoin`, `quantumswap`, `seed-words`) + the embedded
     Go WASM, with Node built-ins polyfilled for the browser.
-- `src/bridge/handlers/**` — the ported bodies of the `ipcMain.handle`
+- `src/platform/handlers/**` — the ported bodies of the `ipcMain.handle`
   channels (crypto, format, seedwords, swap quotes/submits, send, platform).
   Contract addresses, slippage/deadline math, and gas estimation are preserved
-  verbatim; only `require(...)` became `import`, and the local
-  named-pipe/socket RPC paths were removed (browsers can only reach RPC over
-  HTTP/S).
+  verbatim; the local named-pipe/socket RPC paths were removed (browsers can
+  only reach RPC over HTTP/S).
 - Crypto is fully browser-native — no third-party runtime crypto libraries.
   `scrypt` and `randomBytes` come from `quantumcoin`'s native implementations
-  (post-quantum WASM + Web Crypto), and AES-256-CBC in `src/bridge/handlers/crypto.js`
-  uses the Web Crypto API (`crypto.subtle`), which applies PKCS#7 padding and is
-  byte-compatible with Node (see `scripts/verify-crypto-parity.cjs`), so
-  desktop-created wallets still decrypt here.
+  (post-quantum WASM + Web Crypto), and the storage vault uses AES-256-GCM via
+  the Web Crypto API (`crypto.subtle`) with an atomic `{salt, payload}` main-key
+  record; existing extension vaults keep unlocking unchanged (golden
+  byte-compatibility tests live in `src/lib/storage.test.ts`).
 - `entrypoints/background.ts` — the service worker. It makes the toolbar action
   open the docked surface, and acts as the **dApp broker** for the web3 provider
   (`window.quantumcoin`): it opens approval popups, resolves page requests, and
@@ -76,11 +84,11 @@ renderer js  --Api.send-->  preload   renderer js  --Api.send-->  platform-bridg
 
 ### Why a separate esbuild step?
 
-The legacy UI relies on classic global `<script>` files loaded in order and must
-not be transformed. WXT/Vite would try to bundle those. So the UI stays static in
-`public/`, and only the SDK/WASM bridge is bundled (by esbuild) into a single
-self-executing `public/platform-bridge.js`, which WXT then copies like any other
-static asset. This also cleanly injects the Node polyfills the SDKs need.
+The renderer TypeScript is bundled by WXT/Vite, but the SDK + Go WASM bridge is
+kept as a separate esbuild bundle (`public/platform-bridge.js`, a classic
+self-executing script loaded before the module entry). This cleanly injects the
+Node polyfills the SDKs need, keeps the 3.6 MB WASM payload out of the Vite
+graph, and guarantees the `*Api` globals exist before any renderer module runs.
 
 ## Building a dApp
 
@@ -144,8 +152,8 @@ npm run zip:firefox    # firefox zip + AMO sources zip
 
 After changing code, Chrome does **not** auto-reload unpacked builds: run
 `npm run build:chrome` again, then click the reload icon on the extension card.
-(`npm run build:chrome` also re-bundles the SDK bridge, so edits under `src/bridge/**`
-are picked up.)
+(`npm run build:chrome` also re-bundles the SDK bridge, so edits under
+`src/platform/**` are picked up.)
 
 ## Test in Firefox
 
@@ -194,7 +202,7 @@ Content scripts only run on `http(s)://` pages (not `file://`), so the example
    loaded. The page shows **Provider: ready** once `window.quantumcoin` is
    injected (otherwise confirm the extension is loaded and reload the page).
 4. **Connect** — click **Connect Wallet**. A focused approval popup opens
-   (`index.html?view=approval`); enter your wallet password, pick an account,
+   (`approve.html?requestId=...`); enter your wallet password, pick an account,
    and click **Sign & Connect**. The page logs the connected address and chain
    id, and enables the sign/send buttons.
 5. **Sign a message** — edit the message field and click **Sign Message**. Enter
@@ -244,8 +252,9 @@ npm run build:icons
 
 ## Dev/verification scripts
 
-- `node scripts/verify-crypto-parity.cjs` — asserts the browser-native AES-256-CBC
-  (Web Crypto) matches Node byte-for-byte, so desktop-created keystores decrypt here.
+- `npm run typecheck` / `npm run lint` / `npm test` — strict `tsc`, ESLint
+  (HTML-injection sinks banned) and the vitest core suites, including the
+  golden storage byte-compatibility tests (`src/lib/storage.test.ts`).
 - `node scripts/smoke-wasm.cjs` — loads the built bundle in a browser-like
   harness and exercises WASM init, wallet derivation, and keystore
   encrypt/decrypt.

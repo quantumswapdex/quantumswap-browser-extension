@@ -1,9 +1,10 @@
 // Bundles the platform bridge (SDK + WASM + ported IPC handlers + Node polyfills)
 // into public/platform-bridge.js as a self-contained IIFE classic script.
 //
-// Kept separate from WXT/Vite because the legacy wallet UI in public/ uses plain
-// global <script> files and must not be transformed by Vite; this bundle is just
-// another static asset WXT copies from public/.
+// Kept separate from WXT/Vite because it embeds the Go WASM + Node polyfills
+// and must load as the first classic <script> (before the Vite-bundled
+// renderer module) so the *Api globals exist when the renderer runs; this
+// bundle is just another static asset WXT copies from public/.
 import esbuild from "esbuild";
 import { polyfillNode } from "esbuild-plugin-polyfill-node";
 import { fileURLToPath } from "node:url";
@@ -17,7 +18,7 @@ const watch = process.argv.includes("--watch");
 // local dev/watch so production zips stay lean.
 const sourcemap = watch || process.argv.includes("--sourcemap");
 
-const netShim = path.join(root, "src", "bridge", "shims", "net.cjs");
+const netShim = path.join(root, "src", "platform", "shims", "net.cjs");
 
 // Redirect Node's `net` to our browser shim. Must run before polyfillNode so it
 // wins the resolution. `crypto` is no longer aliased: the SDKs provide their
@@ -30,7 +31,7 @@ const aliasPlugin = {
 };
 
 const buildOptions = {
-  entryPoints: [path.join(root, "src", "bridge", "index.js")],
+  entryPoints: [path.join(root, "src", "platform", "bridge-entry.ts")],
   bundle: true,
   outfile: path.join(root, "public", "platform-bridge.js"),
   format: "iife",

@@ -11,9 +11,13 @@
     "postinstall": "wxt prepare",
     "build:icons": "node scripts/build-icons.mjs",
     "build:bridge": "node scripts/build-bridge.mjs",
-    "build": "npm run build:bridge && wxt build && wxt build -b firefox",
-    "build:chrome": "npm run build:bridge && wxt build",
-    "build:firefox": "npm run build:bridge && wxt build -b firefox",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint . --max-warnings 0",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "build": "npm run typecheck && npm run build:bridge && wxt build && wxt build -b firefox",
+    "build:chrome": "npm run typecheck && npm run build:bridge && wxt build",
+    "build:firefox": "npm run typecheck && npm run build:bridge && wxt build -b firefox",
     "build:all": "npm run build",
     "zip": "npm run build:bridge && wxt zip",
     "zip:firefox": "npm run build:bridge && wxt zip -b firefox"
@@ -24,10 +28,15 @@
     "seed-words": "^1.1.1"
   },
   "devDependencies": {
+    "@eslint/js": "^9.39.4",
     "esbuild": "^0.28.1",
     "esbuild-plugin-polyfill-node": "^0.3.0",
+    "eslint": "^9.39.4",
+    "jsdom": "^25.0.1",
     "sharp": "^0.34.5",
     "typescript": "^5.7.0",
+    "typescript-eslint": "^8.8.0",
+    "vitest": "^4.1.10",
     "wxt": "^0.20.27"
   },
   "overrides": {

@@ -377,7 +377,7 @@ export default defineBackground(() => {
   // edge of the currently focused browser window (small inset, near the top,
   // roughly under the toolbar/extension icons) so the page's main content stays
   // visible. Resolves null when the window bounds are unavailable.
-  function rightAnchoredBounds(width: number, height: number): Promise<{ left: number; top: number } | null> {
+  function rightAnchoredBounds(width: number, _height: number): Promise<{ left: number; top: number } | null> {
     return new Promise((resolve) => {
       try {
         const RIGHT_INSET = 16; // gap from the browser window's right edge

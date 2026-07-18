@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="en" data-view="approval">
+
+<head>
+    <!-- Platform bridge (SDK + WASM + *Api globals) must load before the
+         approval module runs; classic scripts in <head> execute before
+         deferred module scripts. Built by scripts/build-bridge.mjs. -->
+    <script src="/platform-bridge.js"></script>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="/assets/fonts/SFPro/stylesheet.css">
+    <link rel="stylesheet" href="/assets/fonts/Poppins/stylesheet.css">
+    <link rel="stylesheet" href="/styles.css">
+    <link rel="stylesheet" href="/popup.css">
+    <link rel="stylesheet" href="/theme.css">
+    <link rel="stylesheet" href="/approve.css">
+
+    <title>QuantumSwap</title>
+</head>
+
+<body>
+    <script type="module" src="./main.ts"></script>
+</body>
+
+</html>
