@@ -4,11 +4,8 @@ import { el } from "../ui/dom";
 import type { ScreenModule } from "../ui/screens";
 import { addNetwork, showAddNetworkScreen, showNetworksScreen, showSettingsScreen, showWalletPath, showWalletScreen } from "../app/app";
 import { showAdvancedSigningSettingDialog } from "../app/dialog";
-import { OpenUrl } from "../lib/bridge";
 import { showReleasesScreen } from "../app/release";
 import { showSpoofWordsDialog } from "../app/spoofbuster";
-
-const PRIVACY_POLICY_URL = "https://quantumswap.com/browser-extension-privacy-policy.html";
 
 type MenuAction = () => unknown;
 
@@ -42,8 +39,6 @@ function buildSettingsScreen(): HTMLElement {
                             menuLink("signing", "Signing", "4003", showAdvancedSigningSettingDialog),
                             el("div", { class: "divider" }),
                             menuLink("spoof-buster-words", "Spoof Buster Words", "4004", showSpoofWordsDialog),
-                            el("div", { class: "divider" }),
-                            menuLink("privacy-policy", "Privacy Policy", "4007", () => OpenUrl(PRIVACY_POLICY_URL)),
                             el("div", { class: "divider" }),
                         ]),
                     ]),

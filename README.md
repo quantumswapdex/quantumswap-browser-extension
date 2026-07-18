@@ -303,9 +303,9 @@ Work through these in the popup to confirm parity with the desktop app:
   proceeds to review.
 - **Swap** — quote → approve/allowance → swap.
 - **QR display** and **network switching**.
-- **Settings** — Wallet Path, Networks, Releases, Signing, **Spoof Buster
-  Words** (shows the stored words), and **Privacy Policy** (opens the hosted
-  policy). The burger menu also links to Builder / QuantumSwap / QuantumCoin.
+- **Settings** — Wallet Path, Networks, Releases, Signing, and **Spoof Buster
+  Words** (shows the stored words). The burger menu links to Builder /
+  QuantumSwap / QuantumCoin and the **Privacy Policy**.
 - **web3 dApp** — connect, sign a message, and send from `examples/dapp.html`,
   confirming the Spoof Buster gate in the side panel each time
   (see [Test the web3 dApp example page](#test-the-web3-dapp-example-page)).
@@ -353,4 +353,4 @@ npm run build:icons
 - **Privacy:** the extension collects no user data and talks only to the
   blockchain endpoints the user configures. The policy is hosted at
   <https://quantumswap.com/browser-extension-privacy-policy.html> and linked
-  from **Settings > Privacy Policy**.
+  from the burger menu (**Privacy Policy**).
