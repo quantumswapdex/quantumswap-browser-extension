@@ -97,6 +97,58 @@ function buildHeader(): HTMLElement {
     ]);
 }
 
+// Spoof Buster gate: shown before any request details render. The words must
+// match the user's memorized Spoof Buster Words; a spoofed window cannot know
+// them (it cannot read this extension's localStorage). Driven by dapp.ts,
+// which also rolls the 1-in-10 training rounds.
+function buildSpoofGateCard(): HTMLElement {
+    return el("div", { id: "dappSpoofGateRoot", class: "center-content home-content", style: "display:none; margin-top:10px;" }, [
+        el("div", { class: "center-content-rounded-container" }, [
+            el("div", { class: "roundex-box scrollbar screen-scroll-box" }, [
+                el("div", { class: "heading bold", "data-lang-key": "spoof-gate-title" }, ["Check your Spoof Buster Words"]),
+                el("div", { class: "divider" }),
+                el("div", { class: "heading medium", "data-lang-key": "spoof-gate-desc", style: "text-align:left; white-space:normal; word-break:break-word;" }, [
+                    "These should match your Spoof Buster Words. If they don't, this window is fake - close it and try again.",
+                ]),
+                el("div", { class: "spoof-words-row", id: "dappSpoofWords" }),
+                el("div", { style: "margin-top:10px; text-align:left; display:flex; flex-direction:column; gap:8px;" }, [
+                    el("label", { class: "tab-label", style: "cursor:pointer;" }, [
+                        el("input", { type: "radio", name: "spoof_gate_option", value: "correct", id: "optSpoofCorrect", tabindex: "1" }),
+                        el("span", { "data-lang-key": "spoof-gate-correct" }, ["Correct - these are my words"]),
+                    ]),
+                    el("label", { class: "tab-label", style: "cursor:pointer;" }, [
+                        el("input", { type: "radio", name: "spoof_gate_option", value: "incorrect", id: "optSpoofIncorrect", tabindex: "2" }),
+                        el("span", { "data-lang-key": "spoof-gate-incorrect" }, ["Incorrect - these are not my words"]),
+                    ]),
+                ]),
+                el("div", { id: "dappSpoofGateStatus", class: "heading medium", style: "margin-top:8px; text-align:left;" }),
+                el("div", { style: "display:flex; justify-content:flex-end; margin-top:12px;" }, [
+                    el("button", { class: "large_button_container heading large", id: "dappSpoofNextBtn", "data-lang-key": "next", role: "button", tabindex: "3" }, ["Next"]),
+                ]),
+            ]),
+        ]),
+    ]);
+}
+
+// Redirector / notice card for the dApp-triggered popup: approvals themselves
+// run in the side panel; this popup only points the user there.
+function buildRedirectCard(): HTMLElement {
+    return el("div", { id: "dappRedirectRoot", class: "center-content home-content", style: "display:none; margin-top:10px;" }, [
+        el("div", { class: "center-content-rounded-container" }, [
+            el("div", { class: "roundex-box scrollbar screen-scroll-box" }, [
+                el("div", { class: "heading bold", id: "dappRedirectTitle" }),
+                el("div", { class: "divider" }),
+                el("div", { class: "heading medium", id: "dappRedirectText", style: "text-align:left; white-space:normal; word-break:break-word;" }),
+                // Stacked full-width buttons (one per row): primary action on top.
+                el("div", { id: "dappRedirectButtons", style: "display:none; flex-direction:column; gap:12px; margin-top:16px;" }, [
+                    el("button", { class: "large_button_container heading large", id: "dappRedirectOpenBtn", "data-lang-key": "spoof-redirect-open-btn", role: "button", tabindex: "1", style: "width:100%; box-sizing:border-box;" }, ["Open side panel & continue"]),
+                    el("button", { class: "cancel", id: "dappRedirectRejectBtn", "data-lang-key": "dapp-reject", role: "button", tabindex: "2", style: "width:100%; box-sizing:border-box;" }, ["Reject"]),
+                ]),
+            ]),
+        ]),
+    ]);
+}
+
 // dApp approval card (styled like the Send screen). Populated by dapp.ts.
 function buildApprovalCard(): HTMLElement {
     return el("div", { id: "dappApprovalRoot", class: "center-content home-content", style: "margin-top:10px;" }, [
@@ -232,5 +284,7 @@ export const approvalScreenModules: ScreenModule[] = [
     { parentId: null, build: buildSendCompletedDialog },
     { parentId: null, build: buildGasConfigDialog },
     { parentId: null, build: buildHeader },
+    { parentId: null, build: buildSpoofGateCard },
+    { parentId: null, build: buildRedirectCard },
     { parentId: null, build: buildApprovalCard },
 ];

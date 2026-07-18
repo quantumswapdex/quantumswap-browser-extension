@@ -107,6 +107,14 @@ function buildWelcomeScreen(): HTMLElement {
                         el("div", { class: "heading bold medium", id: "divInfoPanelTitle" }, ["Info Title"]),
                         el("div", { class: "heading medium", id: "divInfoPanelDetail", style: "font-weight:400; white-space:normal; overflow-wrap:anywhere; word-break:break-word; min-width:0;" }, ["Info Detail"]),
                     ]),
+                    // Spoof Buster Words panel: shown as the last welcome step
+                    // (infoContainer hidden) by displaySpoofWordsStep().
+                    el("div", { id: "divSpoofWordsPanel", style: "display: none;" }, [
+                        el("div", { class: "heading bold medium", "data-lang-key": "spoof-onboarding-title" }, ["Your Spoof Buster Words"]),
+                        el("div", { class: "heading medium", style: "font-weight:400; white-space:normal; overflow-wrap:anywhere; word-break:break-word; min-width:0;", "data-lang-key": "spoof-onboarding-desc" }, ["Memorize these three words. Every genuine wallet request window will show them to you first. If a window shows different words, or no words at all, it is fake - close it immediately. Never share these words with anyone."]),
+                        el("div", { class: "spoof-words-row", id: "divSpoofWordsOnboarding" }),
+                        el("div", { class: "heading medium", style: "font-weight:400; white-space:normal; overflow-wrap:anywhere; word-break:break-word; min-width:0;", "data-lang-key": "spoof-onboarding-desc-2" }, ["These words will be shown again every time you unlock your wallet, so you don't have to worry about forgetting them."]),
+                    ]),
                     el("div", { class: "divider" }),
                     el("div", { style: "display: flex; justify-content: flex-end;" }, [
                         el("div", { id: "nextButtonWelcomeScreen", class: "large_button_container heading large", "data-lang-key": "next", role: "button", tabindex: "25", onclick: () => nextInfoStep() }, ["Next"]),

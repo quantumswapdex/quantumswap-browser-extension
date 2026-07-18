@@ -34,6 +34,7 @@ import {
     blockchainNetworksList,
 } from "../lib/blockchainNetwork";
 import { extApi } from "../platform/extension";
+import { pickDecoyWords, renderSpoofBusterWords, spoofBusterLoad, spoofRandomInt } from "../app/spoofbuster";
 
 interface PendingApprovalRequest {
     method: string;
@@ -78,6 +79,12 @@ function startKeepAlive(): void {
     function connect(): void {
         try {
             port = extApi().runtime.connect({ name: "qc-approval" });
+            // Panel-hosted approvals identify themselves so the broker can
+            // auto-reject the request if the panel closes without a result
+            // (the panel equivalent of the popup's windows.onRemoved).
+            if (APPROVAL_VIEW === "panel" && REQUEST_ID) {
+                try { port.postMessage({ type: "approval-hello", requestId: REQUEST_ID, view: "panel" }); } catch { /* ignore */ }
+            }
             port.onDisconnect.addListener(function () {
                 void extApi().runtime.lastError; // swallow disconnect error
                 port = null;
@@ -95,7 +102,14 @@ function startKeepAlive(): void {
     }, 20000);
 }
 
-const REQUEST_ID = new URLSearchParams(location.search).get("requestId") || "";
+const URL_PARAMS = new URLSearchParams(location.search);
+const REQUEST_ID = URL_PARAMS.get("requestId") || "";
+// "" (approval flow, panel-hosted) | "notice" | "open-panel" (redirector popup)
+const APPROVAL_MODE = URL_PARAMS.get("mode") || "";
+// "panel" when this page is hosted in the side panel / sidebar
+const APPROVAL_VIEW = URL_PARAMS.get("view") || "";
+// The requesting tab's windowId (redirector popup only; targets sidePanel.open)
+const APPROVAL_WIN = URL_PARAMS.get("win");
 let currentNet: BlockchainNetwork | null = null;
 let pendingRequest: PendingApprovalRequest | null = null;
 let settled = false;
@@ -380,6 +394,11 @@ function wirePasswordToggle(): void {
 }
 
 function closeWindow(): void {
+    // Panel-hosted: window.close() would close the whole side panel. Navigate
+    // the panel back to the wallet instead.
+    if (APPROVAL_VIEW === "panel") {
+        try { location.replace("index.html?view=panel"); return; } catch { /* fall through */ }
+    }
     try { window.close(); } catch { /* ignore */ }
 }
 
@@ -441,10 +460,17 @@ async function replyResult(result: unknown): Promise<void> {
     closeWindow();
 }
 
-async function replyReject(message?: string): Promise<void> {
+// Send the rejection without closing/navigating this surface (callers decide
+// how to close; the panel-hosted spoof-mismatch path must NOT return to the
+// wallet UI).
+async function replyRejectRaw(message?: string): Promise<void> {
     if (settled) return;
     settled = true;
     await sendToBackground({ type: "qc-approval-result", requestId: REQUEST_ID, approved: false, error: message || "User rejected the request" });
+}
+
+async function replyReject(message?: string): Promise<void> {
+    await replyRejectRaw(message);
     closeWindow();
 }
 
@@ -479,6 +505,214 @@ function showErrorOnlyReject(message?: string | null): void {
     if (ok) ok.onclick = function () { replyReject(msg).catch(function () { closeWindow(); }); };
     const d = el("modalOkDialog") as HTMLDialogElement | null;
     if (d) { d.style.display = "block"; if (d.showModal) { try { d.showModal(); } catch { /* already open */ } } }
+}
+
+// ---- Spoof Buster gate + redirector modes ------------------------------
+// The genuine approval flow (side-panel hosted) starts with a gate showing the
+// user's Spoof Buster Words. 1 round in 10 is a training round: method A shows
+// decoy words, method B skips the gate entirely (simulating a spoofed window)
+// and educates on any engagement. Every training round rejects the dApp
+// request; the user retries the action on the dApp.
+
+type SpoofGateOutcome = "proceed" | "handled";
+
+// Training method B active: the rendered approval screen is a drill; any
+// engagement (password field, Approve) triggers the educational dialog and the
+// real approval logic is never reachable.
+let spoofTrainingModeB = false;
+
+// OK-only dialog for training outcomes (mirrors showErrorOnlyReject): OK, or
+// closing the surface, rejects the request. `goodCatch` shows the success icon.
+function showSpoofTrainingDialog(message: string, goodCatch: boolean): void {
+    show("dappApprovalRoot", false);
+    show("dappSpoofGateRoot", false);
+    const p = el("pDetails");
+    if (p) p.textContent = message;
+    const warn = el("divWarn");
+    if (warn) warn.style.display = goodCatch ? "none" : "";
+    const succ = el("divSuccess");
+    if (succ) succ.style.display = goodCatch ? "" : "none";
+    const ok = el("divModalOk");
+    if (ok) ok.onclick = function () { replyReject("Spoof Buster training round").catch(function () { closeWindow(); }); };
+    const d = el("modalOkDialog") as HTMLDialogElement | null;
+    if (d) { d.style.display = "block"; if (d.showModal) { try { d.showModal(); } catch { /* already open */ } } }
+}
+
+// Normal round, words marked "Incorrect": fail closed. Reject the request,
+// explain, and close the WHOLE side panel - never fall through to the wallet
+// unlock/password UI, which is exactly what a spoofed flow would want next.
+function showSpoofMismatchDialog(): void {
+    show("dappApprovalRoot", false);
+    show("dappSpoofGateRoot", false);
+    const p = el("pDetails");
+    if (p) p.textContent = t("spoof-gate-mismatch", "The request was rejected. This side panel will now close - reopen it from the toolbar and try the request again. If you are unsure of your words, unlock your wallet and check Settings > Spoof Buster Words.");
+    const warn = el("divWarn");
+    if (warn) warn.style.display = "";
+    const succ = el("divSuccess");
+    if (succ) succ.style.display = "none";
+    const ok = el("divModalOk");
+    if (ok) ok.onclick = function () {
+        replyRejectRaw("Spoof check failed")
+            .catch(function () { /* background may be gone; port disconnect rejects */ })
+            .finally(function () { try { window.close(); } catch { /* ignore */ } });
+    };
+    const d = el("modalOkDialog") as HTMLDialogElement | null;
+    if (d) { d.style.display = "block"; if (d.showModal) { try { d.showModal(); } catch { /* already open */ } } }
+}
+
+function spoofTrainingBEducate(): void {
+    showSpoofTrainingDialog(
+        t("spoof-training-b-educate", "This was an anti-spoofing drill. Your Spoof Buster words were never shown - never enter your password unless you saw and confirmed your words first. A window that skips the word check is fake: close it and try again."),
+        false,
+    );
+}
+
+// Method B: render the normal approval screen with no gate (exactly what a
+// spoofed window would do). Engaging the password field or Approve educates;
+// Reject / closing is the right response.
+function armSpoofTrainingModeB(): void {
+    spoofTrainingModeB = true;
+    const pwd = inputEl("dappPassword");
+    if (pwd) {
+        pwd.addEventListener("focus", spoofTrainingBEducate, { once: true });
+        pwd.addEventListener("keydown", spoofTrainingBEducate, { once: true });
+    }
+}
+
+// Show the gate (or arm a training round) and resolve with whether the real
+// approval flow may proceed. "handled" means a dialog/reject path took over.
+async function runSpoofGatePhase(): Promise<SpoofGateOutcome> {
+    const words = await spoofBusterLoad();
+    if (words == null) {
+        // No words stored (fresh install mid-onboarding): skip the gate.
+        show("dappApprovalRoot", true);
+        return "proceed";
+    }
+    const isTraining = spoofRandomInt(10) === 0;
+    if (isTraining && spoofRandomInt(2) === 1) {
+        armSpoofTrainingModeB();
+        show("dappApprovalRoot", true);
+        return "proceed";
+    }
+    const displayWords = isTraining ? pickDecoyWords(words, words.length) : words;
+
+    return await new Promise<SpoofGateOutcome>(function (resolve) {
+        renderSpoofBusterWords(el("dappSpoofWords") as HTMLElement, displayWords);
+        show("dappApprovalRoot", false);
+        show("dappSpoofGateRoot", true);
+
+        const nextBtn = el("dappSpoofNextBtn");
+        if (!nextBtn) { resolve("handled"); return; }
+        nextBtn.onclick = function () {
+            const correct = inputEl("optSpoofCorrect");
+            const incorrect = inputEl("optSpoofIncorrect");
+            const saidCorrect = !!(correct && correct.checked);
+            const saidIncorrect = !!(incorrect && incorrect.checked);
+            if (!saidCorrect && !saidIncorrect) {
+                const s = el("dappSpoofGateStatus");
+                if (s) s.textContent = t("spoof-gate-select-option", "Please select an option.");
+                return;
+            }
+            if (isTraining) {
+                // Method A: the words shown are decoys.
+                if (saidIncorrect) {
+                    showSpoofTrainingDialog(
+                        t("spoof-training-a-good-catch", "Good catch - this was a training check. You should always close the window and try again if incorrect words are shown."),
+                        true,
+                    );
+                } else {
+                    showSpoofTrainingDialog(
+                        t("spoof-training-a-educate", "The words shown were NOT your Spoof Buster words. A mismatch means the window is fake - always close it and try again. This was a training check; the request was rejected."),
+                        false,
+                    );
+                }
+                resolve("handled");
+                return;
+            }
+            if (saidCorrect) {
+                show("dappSpoofGateRoot", false);
+                show("dappApprovalRoot", true);
+                resolve("proceed");
+                return;
+            }
+            // Real words marked incorrect: fail closed with an explanation and
+            // close the side panel (no wallet/password UI after a mismatch).
+            showSpoofMismatchDialog();
+            resolve("handled");
+        };
+    });
+}
+
+// mode=notice: the panel is already open and has the approval; this popup only
+// points the user at it, then closes itself.
+function renderNoticeMode(): void {
+    show("dappApprovalRoot", false);
+    show("dappRedirectRoot", true);
+    const title = el("dappRedirectTitle");
+    if (title) title.textContent = t("spoof-redirect-notice-title", "Continue in the side panel");
+    const text = el("dappRedirectText");
+    if (text) text.textContent = t("spoof-redirect-notice-text", "A wallet request is waiting for you in the QuantumSwap side panel.");
+    setTimeout(function () { try { window.close(); } catch { /* ignore */ } }, 3000);
+}
+
+// mode=open-panel: the panel is closed. Explain that genuine approvals happen
+// only in the side panel and open it with the click's user gesture.
+async function renderOpenPanelMode(): Promise<void> {
+    show("dappApprovalRoot", false);
+    show("dappRedirectRoot", true);
+    const buttons = el("dappRedirectButtons");
+    if (buttons) buttons.style.display = "flex";
+    const title = el("dappRedirectTitle");
+    if (title) title.textContent = t("spoof-redirect-title", "Wallet request waiting");
+
+    const unlocked = (await readSessionAddress()) != null;
+    const text = el("dappRedirectText");
+    if (text) {
+        text.textContent = unlocked
+            ? t("spoof-redirect-text-unlocked", "A site is requesting access to your wallet. For your safety, wallet requests are only approved inside the QuantumSwap side panel. Open the side panel to review the request there.")
+            : t("spoof-redirect-text-locked", "A site is requesting access to your wallet. For your safety, wallet requests are only approved inside the QuantumSwap side panel. Open the side panel and unlock your wallet there to continue.");
+    }
+
+    const rejectBtn = el("dappRedirectRejectBtn");
+    if (rejectBtn) rejectBtn.addEventListener("click", function () {
+        replyReject("User rejected the request").catch(function () { closeWindow(); });
+    });
+    const openBtn = el("dappRedirectOpenBtn");
+    if (openBtn) openBtn.addEventListener("click", onOpenPanelClick);
+}
+
+// Must run synchronously within the click so sidePanel.open() keeps the user
+// gesture (same pattern as walletDock in src/platform/surface.ts).
+function onOpenPanelClick(): void {
+    const A = extApi();
+    const winId = APPROVAL_WIN != null ? Number(APPROVAL_WIN) : NaN;
+    // Mark the request as continuing in the panel BEFORE this popup closes, so
+    // windows.onRemoved does not auto-reject it.
+    const markRouted = sendToBackground({ type: "qc-approval-mark-routed", requestId: REQUEST_ID }).catch(function () { /* ignore */ });
+    const finish = function () { markRouted.then(function () { try { window.close(); } catch { /* ignore */ } }); };
+    const fail = function () {
+        setStatus(t("spoof-redirect-open-failed", "Could not open the side panel. Please open it from the toolbar."));
+    };
+    try {
+        if (A.sidePanel && A.sidePanel.open) {
+            const opts = !isNaN(winId) ? { windowId: winId } : {};
+            A.sidePanel.open(opts).then(finish).catch(function () {
+                // Fallback: last focused normal window (may lose the gesture).
+                A.windows.getLastFocused({ windowTypes: ["normal"] })
+                    .then(function (w: any) { return A.sidePanel.open({ windowId: w.id }); })
+                    .then(finish)
+                    .catch(fail);
+            });
+        } else if (A.sidebarAction && A.sidebarAction.open) {
+            const p = A.sidebarAction.open();
+            if (p && p.then) p.then(finish).catch(fail);
+            else finish();
+        } else {
+            fail();
+        }
+    } catch {
+        fail();
+    }
 }
 
 // SEC-14: true if any of the supplied display values carries spoofing Unicode
@@ -1019,6 +1253,10 @@ async function runApprove(password: string): Promise<void> {
 }
 
 function onApprove(): void {
+    // Training method B drill: approving a gate-less window is the mistake
+    // being taught. The real approval logic is unreachable in this mode.
+    if (spoofTrainingModeB) { spoofTrainingBEducate(); return; }
+
     const approveBtn = el("dappApproveBtn") as HTMLButtonElement | null;
 
     // Connect + locked: first click unlocks (loads accounts, shows the
@@ -1327,7 +1565,24 @@ export async function initDappApproval(): Promise<void> {
 
     setStatus(t("dapp-loading", "Loading request…"));
 
+    // Redirector modes: the dApp-triggered popup only points the user at the
+    // side panel; no request details render here at all.
+    if (APPROVAL_MODE === "notice") { renderNoticeMode(); return; }
+    if (APPROVAL_MODE === "open-panel") { await renderOpenPanelMode(); return; }
+
+    // Hide the card until the Spoof Buster gate resolves so no request UI is
+    // visible before the words are confirmed (error paths below re-show it).
+    show("dappApprovalRoot", false);
+
     el("dappRejectBtn")!.addEventListener("click", function () {
+        if (spoofTrainingModeB) {
+            // Method B drill: rejecting the gate-less window is the right call.
+            showSpoofTrainingDialog(
+                t("spoof-training-b-good-catch", "Correct - the Spoof Buster words were never shown, so this window should not be trusted. This was a training check; the request was rejected."),
+                true,
+            );
+            return;
+        }
         replyReject("User rejected the request").catch(function () { closeWindow(); });
     });
     el("dappApproveBtn")!.addEventListener("click", onApprove);
@@ -1335,6 +1590,7 @@ export async function initDappApproval(): Promise<void> {
     try {
         const res = await sendToBackground({ type: "qc-approval-getRequest", requestId: REQUEST_ID });
         if (!res || !res.ok || !res.request) {
+            show("dappApprovalRoot", true);
             setStatus(t("dapp-request-unavailable", "This request is no longer available."));
             (el("dappApproveBtn") as HTMLButtonElement).disabled = true;
             return;
@@ -1348,10 +1604,15 @@ export async function initDappApproval(): Promise<void> {
         // disable Approve, and don't render the request screen (Reject stays).
         const verr = await validateApprovalRequest(pendingRequest.method, params);
         if (verr) {
+            show("dappApprovalRoot", true);
             setStatus(verr);
             (el("dappApproveBtn") as HTMLButtonElement).disabled = true;
             return;
         }
+
+        // Spoof Buster gate (or a training round) before any request details.
+        const gate = await runSpoofGatePhase();
+        if (gate === "handled") return;
 
         switch (pendingRequest.method) {
             case "qc_requestAccounts":

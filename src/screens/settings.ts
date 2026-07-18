@@ -5,6 +5,7 @@ import type { ScreenModule } from "../ui/screens";
 import { addNetwork, showAddNetworkScreen, showNetworksScreen, showSettingsScreen, showWalletPath, showWalletScreen } from "../app/app";
 import { showAdvancedSigningSettingDialog } from "../app/dialog";
 import { showReleasesScreen } from "../app/release";
+import { showSpoofWordsDialog } from "../app/spoofbuster";
 
 type MenuAction = () => unknown;
 
@@ -36,6 +37,8 @@ function buildSettingsScreen(): HTMLElement {
                             menuLink("releases", "Releases", "4005", showReleasesScreen),
                             el("div", { class: "divider" }),
                             menuLink("signing", "Signing", "4003", showAdvancedSigningSettingDialog),
+                            el("div", { class: "divider" }),
+                            menuLink("spoof-buster-words", "Spoof Buster Words", "4004", showSpoofWordsDialog),
                             el("div", { class: "divider" }),
                         ]),
                     ]),

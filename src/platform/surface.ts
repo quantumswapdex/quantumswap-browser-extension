@@ -22,6 +22,47 @@ const winParam = params.get("win");
 // initSurfaceView() is called at the top of the renderer bootstrap.
 export function initSurfaceView(): void {
     document.documentElement.setAttribute("data-view", view);
+    if (view === "panel") connectPanelPresencePort();
+}
+
+// While hosted in the side panel / sidebar, hold a long-lived
+// "qc-surface-panel" port so the background broker knows the panel is open
+// (exact signal on both Chrome and Firefox). The broker routes dApp approvals
+// here with a qc-navigate-approval message; the panel navigates itself to the
+// approval page (self-navigation avoids sidePanel.setOptions reload quirks).
+function connectPanelPresencePort(): void {
+    const A = extApi();
+    if (!A || !A.runtime || !A.runtime.connect) return;
+    function connect(): void {
+        let port: any = null;
+        try {
+            port = A.runtime.connect({ name: "qc-surface-panel" });
+        } catch {
+            return;
+        }
+        try {
+            const w = A.windows && A.windows.getCurrent ? A.windows.getCurrent() : null;
+            if (w && typeof w.then === "function") {
+                w.then(function (win: any) {
+                    try { port.postMessage({ type: "panel-hello", windowId: win && win.id != null ? win.id : null }); } catch { /* ignore */ }
+                }).catch(function () { /* ignore */ });
+            }
+        } catch { /* ignore */ }
+        port.onMessage.addListener(function (m: any) {
+            if (m && m.type === "qc-navigate-approval" && typeof m.requestId === "string") {
+                location.replace(A.runtime.getURL(
+                    "approve.html?requestId=" + encodeURIComponent(m.requestId) + "&view=panel",
+                ));
+            }
+        });
+        // Chrome force-closes runtime ports at ~5 min; reconnect so the broker
+        // keeps seeing the panel as open.
+        port.onDisconnect.addListener(function () {
+            void A.runtime.lastError;
+            setTimeout(connect, 100);
+        });
+    }
+    connect();
 }
 
 // Close the current surface. Tabs can't close via window.close(), so use the
