@@ -41,9 +41,12 @@ function burgerItem(id: string, tabindex: string, iconSrc: string, iconAlt: stri
 }
 
 // External-site link in the burger menu (opens in a new tab; no icon).
-function burgerLinkItem(id: string, tabindex: string, label: string, url: string): HTMLElement {
+// `langKey` localizes the label; brand-name links omit it.
+function burgerLinkItem(id: string, tabindex: string, label: string, url: string, langKey?: string): HTMLElement {
+    const labelAttrs: Record<string, string> = { class: "tab-name" };
+    if (langKey != null) labelAttrs["data-lang-key"] = langKey;
     return el("div", { class: "burger-item", id, role: "button", tabindex, onclick: () => { closeBurgerMenu(); void OpenUrl(url); } }, [
-        el("div", { class: "tab-name" }, [label]),
+        el("div", labelAttrs, [label]),
     ]);
 }
 
@@ -83,6 +86,8 @@ function buildHeader(): HTMLElement {
                 burgerLinkItem("burgerLinkBuilder", "16", "Builder", "https://builder.quantumcoin.org"),
                 burgerLinkItem("burgerLinkQuantumSwap", "17", "QuantumSwap", "https://app.quantumswap.com"),
                 burgerLinkItem("burgerLinkQuantumCoin", "18", "QuantumCoin", "https://quantumcoin.org"),
+                el("div", { class: "burger-separator" }),
+                burgerLinkItem("burgerLinkPrivacyPolicy", "19", "Privacy Policy", "https://quantumswap.com/browser-extension-privacy-policy.html", "privacy-policy"),
             ]),
         ]),
         el("div", { class: "dropdown", id: "divNetworkDropdown", role: "button", tabindex: "1000", style: "display:none;", onclick: () => { void showNetworkDialog(); } }, [
