@@ -1557,6 +1557,16 @@ select {
     max-height: calc(100vh - 285px);
 }
 
+/* Bounds a wallet screen's inner card to the space below the fixed header so a
+   vertical scrollbar appears dynamically when its content overflows (notably in
+   the fixed-height overlay popup and the dApp approval popup). Viewport-based
+   so it also works when docked. popup.css / approve.css override the max-height
+   per surface. */
+.screen-scroll-box {
+    max-height: calc(100vh - 170px);
+    overflow-y: auto;
+    overflow-x: auto;
+}
 
 .selectwrapper {
     border-radius: 5px;
