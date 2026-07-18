@@ -861,10 +861,15 @@ img[alt="Show Password"] {
 
 .modal-content {
     background-color: #fefefe;
-    margin: 25% auto; 
+    margin: 25% auto;
     padding: 20px;
     border: 1px solid #888;
-    width: 80%; 
+    width: 80%;
+    /* Cap line length on wide surfaces (tab / detached window) so long dialog
+       texts stay readable; auto margins keep the box centered. Dialogs that
+       want a tighter box (gas config, send completed, token picker) override
+       with a smaller max-width. */
+    max-width: 600px;
     border-radius: 15px;
 }
 
@@ -1600,4 +1605,88 @@ select {
     height: 1px;
     background: #e6e6e6;
     margin: 6px 8px;
+}
+
+/* ---- Spoof Buster Words (anti-spoofing) ---- */
+
+/* Container of the three word chips. */
+.spoof-words-row {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin: 10px 0;
+}
+
+/* One word chip. Colors are a FIXED position-based palette (word 1/2/3 =
+   style-0/1/2), identical for all users: only the words are the secret; the
+   colors are a readability/recognition aid. */
+.spoof-word {
+    display: inline-block;
+    padding: 4px 12px;
+    border-radius: 8px;
+    font-family: "Poppins", sans-serif;
+    font-weight: 700;
+    font-size: 14pt;
+    line-height: 1.4;
+}
+
+.spoof-style-0 {
+    color: #7f1d1d;
+    background: #fde8e8;
+    border: 1px solid #b02a2a;
+}
+
+.spoof-style-1 {
+    color: #14532d;
+    background: #e7f6ec;
+    border: 1px solid #1b5e20;
+}
+
+.spoof-style-2 {
+    color: #ffffff;
+    background: #1e3a8a;
+    border: 1px solid #172554;
+}
+
+/* Bottom slide-up banner re-showing the words after every unlock. */
+.spoof-unlock-slider {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 1200;
+    background: #ffffff;
+    border-top: 2px solid #65cedf;
+    box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.25);
+    padding: 12px 16px 16px 16px;
+    text-align: center;
+    animation: spoof-slide-up 0.8s ease-out;
+}
+
+.spoof-unlock-slider .spoof-slider-title {
+    font-size: 11pt;
+    margin-bottom: 4px;
+}
+
+.spoof-slider-close {
+    position: absolute;
+    top: 4px;
+    right: 10px;
+    border: none;
+    background: none;
+    font-size: 14pt;
+    cursor: pointer;
+    color: #555555;
+}
+
+@keyframes spoof-slide-up {
+    from {
+        transform: translateY(100%);
+    }
+
+    to {
+        transform: translateY(0);
+    }
 }

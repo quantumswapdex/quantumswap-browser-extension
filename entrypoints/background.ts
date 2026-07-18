@@ -129,6 +129,64 @@ export default defineBackground(() => {
   const lastApprovalOpenedAt = new Map<string, number>();
   const approvalCooldownUntil = new Map<string, number>();
 
+  // ---- side-panel approval routing ---------------------------------------
+  // Approvals render inside the side panel (browser chrome a web page cannot
+  // spoof). The wallet page, when hosted in the panel, holds a long-lived
+  // "qc-surface-panel" port, giving the broker an exact open/closed signal per
+  // window on both Chrome and Firefox.
+  const panelPorts = new Map<any, number | null>(); // port -> windowId (from panel-hello)
+  // The single approval currently routed to (or waiting for) the panel.
+  let panelRoutedRequestId: string | null = null;
+  // Requests that continue in the panel: closing their redirector popup must
+  // NOT auto-reject them via windows.onRemoved.
+  const routedRequests = new Set<string>();
+  // Keep-alive ports opened by approval pages as "qc-approval:<requestId>".
+  // When the last port for a request disconnects without a result (user closed
+  // the panel / popup), the request is rejected - this replaces
+  // windows.onRemoved for panel-hosted approvals.
+  const approvalPortsByRequest = new Map<string, Set<any>>();
+
+  function clearRouted(requestId: string) {
+    routedRequests.delete(requestId);
+    if (panelRoutedRequestId === requestId) panelRoutedRequestId = null;
+  }
+
+  function rejectPending(requestId: string, message: string) {
+    const p = pending.get(requestId);
+    if (!p) return;
+    pending.delete(requestId);
+    clearRouted(requestId);
+    markApprovalRejected(p.origin);
+    p.reject(new Error(message));
+  }
+
+  // The panel port to route an approval to: prefer the panel docked to the
+  // requesting tab's window, else any open panel.
+  function pickPanelPort(windowId: number | null): any | null {
+    let anyPort: any = null;
+    for (const [port, wid] of panelPorts) {
+      if (anyPort == null) anyPort = port;
+      if (windowId != null && wid === windowId) return port;
+    }
+    return anyPort;
+  }
+
+  function resolveTabWindowId(tabId: number | null): Promise<number | null> {
+    return new Promise((resolve) => {
+      if (tabId == null || !ext.tabs?.get) { resolve(null); return; }
+      try {
+        const p = ext.tabs.get(tabId, (tab: any) => {
+          if (!p || typeof p.then !== "function") resolve(tab && tab.windowId != null ? tab.windowId : null);
+        });
+        if (p && typeof p.then === "function") {
+          p.then((tab: any) => resolve(tab && tab.windowId != null ? tab.windowId : null)).catch(() => resolve(null));
+        }
+      } catch {
+        resolve(null);
+      }
+    });
+  }
+
   function markApprovalRejected(origin: string) {
     if (origin) approvalCooldownUntil.set(origin, Date.now() + APPROVAL_REJECT_COOLDOWN_MS);
   }
@@ -151,7 +209,8 @@ export default defineBackground(() => {
 
   // The extension page each broker control message must come from.
   function expectedSenderPage(type: string): string | null {
-    if (type === "qc-approval-getRequest" || type === "qc-approval-result" || type === "qc-approval-txBroadcast") {
+    if (type === "qc-approval-getRequest" || type === "qc-approval-result" || type === "qc-approval-txBroadcast"
+      || type === "qc-approval-mark-routed") {
       return "approve.html";
     }
     if (type === "qc-active-account-changed" || type === "qc-active-network-changed") {
@@ -299,12 +358,60 @@ export default defineBackground(() => {
     }
   }
 
+  // Open a small helper window (notice / open-panel redirector). When
+  // `rejectRequestId` is given, closing the window without acting rejects that
+  // request - unless it was routed to the panel by then.
+  function openHelperPopup(url: string, width: number, height: number, rejectRequestId: string | null,
+    onCreateError: (e: any) => void) {
+    const done = (win?: any) => {
+      const winId = win && win.id;
+      if (rejectRequestId != null && winId != null && ext.windows?.onRemoved) {
+        const onRemoved = (closedId: number) => {
+          if (closedId === winId) {
+            ext.windows.onRemoved.removeListener(onRemoved);
+            // The user clicked "Open side panel & continue": the request now
+            // lives in the panel, so this popup closing is not a rejection.
+            if (routedRequests.has(rejectRequestId)) return;
+            rejectPending(rejectRequestId, "User rejected the request");
+          }
+        };
+        ext.windows.onRemoved.addListener(onRemoved);
+      }
+    };
+    // Center the popup on the browser window so the side panel opening at the
+    // right edge stays visible. Falls back to no explicit position if the
+    // last-focused window can't be read.
+    centeredBounds(width, height)
+      .then((pos) => {
+        const opts: any = { url, type: "popup", width, height };
+        if (pos) { opts.left = pos.left; opts.top = pos.top; }
+        try {
+          // MV3 chrome and the browser polyfill both return a promise. Only fall
+          // back to the callback form when no promise is returned (never both, to
+          // avoid opening two popups).
+          const created = ext.windows.create(opts, (win: any) => {
+            if (!created || typeof created.then !== "function") done(win);
+          });
+          if (created && typeof created.then === "function") {
+            created.then(done).catch(onCreateError);
+          }
+        } catch (e) {
+          onCreateError(e);
+        }
+      });
+  }
+
   function openApproval(method: string, params: any, origin: string, tabId: number | null): Promise<any> {
     return new Promise((resolve, reject) => {
       // SEC-03: reject before creating a window / registering the request when
       // the pending-approval cap is reached, so no window or promise leaks. Slots
       // free up as the user resolves or closes existing popups.
       if (pending.size >= MAX_PENDING_APPROVALS) {
+        reject(new Error("Too many pending wallet approval requests. Please resolve the open request(s) first."));
+        return;
+      }
+      // Approvals are hosted in the side panel one at a time.
+      if (panelRoutedRequestId != null && pending.has(panelRoutedRequestId)) {
         reject(new Error("Too many pending wallet approval requests. Please resolve the open request(s) first."));
         return;
       }
@@ -325,67 +432,51 @@ export default defineBackground(() => {
       // predict/forge another pending request's id.
       const requestId = crypto.randomUUID();
       pending.set(requestId, { resolve, reject, method, params, origin, tabId });
-      const url = ext.runtime.getURL(`approve.html?requestId=${encodeURIComponent(requestId)}`);
-      const done = (win?: any) => {
-        // If the popup is closed without answering, auto-reject the request.
-        const winId = win && win.id;
-        if (winId != null && ext.windows?.onRemoved) {
-          const onRemoved = (closedId: number) => {
-            if (closedId === winId) {
-              ext.windows.onRemoved.removeListener(onRemoved);
-              const p = pending.get(requestId);
-              if (p) {
-                pending.delete(requestId);
-                markApprovalRejected(p.origin);
-                p.reject(new Error("User rejected the request"));
-              }
-            }
-          };
-          ext.windows.onRemoved.addListener(onRemoved);
-        }
+      panelRoutedRequestId = requestId;
+
+      const onCreateError = (e: any) => {
+        pending.delete(requestId);
+        clearRouted(requestId);
+        reject(e);
       };
-      // Detached popup windows aren't subject to the ~800x600 toolbar-popup cap,
-      // so a 600x800 approval window is allowed (browser still clamps to screen).
-      const width = 600;
-      const height = 800;
-      // Anchor the popup near the right edge of the browser window (like
-      // MetaMask) so it doesn't cover the dApp's main content. Falls back to no
-      // explicit position if the last-focused window can't be read.
-      rightAnchoredBounds(width, height)
-        .then((pos) => {
-          const opts: any = { url, type: "popup", width, height };
-          if (pos) { opts.left = pos.left; opts.top = pos.top; }
-          try {
-            // MV3 chrome and the browser polyfill both return a promise. Only fall
-            // back to the callback form when no promise is returned (never both, to
-            // avoid opening two popups).
-            const created = ext.windows.create(opts, (win: any) => {
-              if (!created || typeof created.then !== "function") done(win);
-            });
-            if (created && typeof created.then === "function") {
-              created.then(done).catch((e: any) => { pending.delete(requestId); reject(e); });
-            }
-          } catch (e) {
-            pending.delete(requestId);
-            reject(e);
-          }
-        });
+
+      resolveTabWindowId(tabId).then((windowId) => {
+        if (!pending.has(requestId)) return;
+        const panelPort = pickPanelPort(windowId);
+        if (panelPort) {
+          // Panel is open: navigate it to the approval page and show a small
+          // auto-closing notice popup pointing the user at the panel.
+          routedRequests.add(requestId);
+          safePost(panelPort, { type: "qc-navigate-approval", requestId });
+          // Tall enough for the header banner + title + full notice text
+          // without the card's internal scrollbar.
+          openHelperPopup(ext.runtime.getURL("approve.html?mode=notice"), 420, 400, null, () => { /* notice is best-effort */ });
+        } else {
+          // Panel is closed: open the redirector popup. Its button opens the
+          // side panel with the click's user gesture and marks the request
+          // routed; closing it without acting rejects the request.
+          const url = ext.runtime.getURL(
+            `approve.html?requestId=${encodeURIComponent(requestId)}&mode=open-panel${windowId != null ? "&win=" + windowId : ""}`,
+          );
+          // Tall enough that title + explanation + both stacked buttons fit
+          // without the card's internal scrollbar (browser clamps to screen).
+          openHelperPopup(url, 460, 680, requestId, onCreateError);
+        }
+      });
     });
   }
 
-  // Compute a top-left that places a width x height popup against the right
-  // edge of the currently focused browser window (small inset, near the top,
-  // roughly under the toolbar/extension icons) so the page's main content stays
-  // visible. Resolves null when the window bounds are unavailable.
-  function rightAnchoredBounds(width: number, _height: number): Promise<{ left: number; top: number } | null> {
+  // Compute a top-left that centers a width x height popup over the currently
+  // focused browser window, leaving the right edge free so the user sees the
+  // side panel slide open there. Resolves null when the window bounds are
+  // unavailable.
+  function centeredBounds(width: number, height: number): Promise<{ left: number; top: number } | null> {
     return new Promise((resolve) => {
       try {
-        const RIGHT_INSET = 16; // gap from the browser window's right edge
-        const TOP_INSET = 80;   // clear the tab strip + toolbar
         const center = (win: any) => {
           if (!win || win.width == null || win.height == null) { resolve(null); return; }
-          const left = Math.round((win.left || 0) + win.width - width - RIGHT_INSET);
-          const top = Math.round((win.top || 0) + TOP_INSET);
+          const left = Math.round((win.left || 0) + (win.width - width) / 2);
+          const top = Math.round((win.top || 0) + (win.height - height) / 2);
           resolve({ left: Math.max(0, left), top: Math.max(0, top) });
         };
         const p = ext.windows.getLastFocused(
@@ -625,13 +716,65 @@ export default defineBackground(() => {
 
   // Provider requests arrive over the long-lived relay port.
   ext.runtime.onConnect.addListener((port: any) => {
+    if (port?.name === "qc-surface-panel") {
+      // Presence port held by the wallet page while hosted in the side panel
+      // (view=panel). Its existence is the exact "panel is open" signal; the
+      // panel-hello message carries the panel's windowId.
+      if (!isSelfPage(port.sender, null)) { try { port.disconnect(); } catch { /* ignore */ } return; }
+      panelPorts.set(port, null);
+      port.onMessage.addListener((m: any) => {
+        if (m && m.type === "panel-hello") {
+          panelPorts.set(port, typeof m.windowId === "number" ? m.windowId : null);
+        }
+      });
+      port.onDisconnect.addListener(() => panelPorts.delete(port));
+      // A routed request is waiting for the panel (the redirector popup opened
+      // it): navigate this fresh panel to the approval page.
+      if (panelRoutedRequestId != null && routedRequests.has(panelRoutedRequestId) && pending.has(panelRoutedRequestId)) {
+        safePost(port, { type: "qc-navigate-approval", requestId: panelRoutedRequestId });
+      }
+      return;
+    }
     if (port?.name === "qc-approval") {
       // Keep-alive channel held by an approval popup for its lifetime. An open
       // port + periodic pings keep the service worker (and the in-memory pending
       // map + relay port) alive through slow signing, so the result is still
-      // delivered when the popup broadcasts. No request logic here.
+      // delivered when the popup broadcasts.
+      // A panel-hosted approval page additionally identifies itself with an
+      // approval-hello carrying its requestId: when its last port disconnects
+      // without a result (the user closed the panel), the request is rejected -
+      // the panel equivalent of the popup's windows.onRemoved auto-reject.
+      if (!isSelfPage(port.sender, "approve.html")) {
+        port.onMessage.addListener((m: any) => {
+          if (m && m.type === "ping") safePost(port, { type: "pong" });
+        });
+        return;
+      }
+      let helloRequestId: string | null = null;
       port.onMessage.addListener((m: any) => {
         if (m && m.type === "ping") safePost(port, { type: "pong" });
+        if (m && m.type === "approval-hello" && typeof m.requestId === "string" && m.view === "panel") {
+          const rid: string = m.requestId;
+          helloRequestId = rid;
+          let set = approvalPortsByRequest.get(rid);
+          if (!set) { set = new Set(); approvalPortsByRequest.set(rid, set); }
+          set.add(port);
+        }
+      });
+      port.onDisconnect.addListener(() => {
+        const rid = helloRequestId;
+        if (rid == null) return;
+        const set = approvalPortsByRequest.get(rid);
+        if (set) { set.delete(port); if (set.size === 0) approvalPortsByRequest.delete(rid); }
+        // Grace period: Chrome force-closes ports at ~5 min and the page
+        // reconnects within ~100ms; only a disconnect with no reconnect means
+        // the approval page is really gone.
+        setTimeout(() => {
+          if (!pending.has(rid)) return;
+          const live = approvalPortsByRequest.get(rid);
+          if (live && live.size > 0) return;
+          rejectPending(rid, "User rejected the request");
+        }, 2000);
       });
       return;
     }
@@ -730,10 +873,21 @@ export default defineBackground(() => {
       return; // sync
     }
 
+    // The redirector popup opened the side panel with the user's gesture: the
+    // request continues in the panel, so closing the popup must not reject it.
+    if (msg.type === "qc-approval-mark-routed") {
+      if (typeof msg.requestId === "string" && pending.has(msg.requestId)) {
+        routedRequests.add(msg.requestId);
+      }
+      sendResponse({ ok: true });
+      return;
+    }
+
     if (msg.type === "qc-approval-result") {
       const p = pending.get(msg.requestId);
       if (p) {
         pending.delete(msg.requestId);
+        clearRouted(msg.requestId);
         if (msg.approved) {
           if (p.method === "qc_requestAccounts" && msg.result && msg.result.address) {
             getConnectedSites().then((sites) => {
@@ -766,6 +920,7 @@ export default defineBackground(() => {
       const p = pending.get(msg.requestId);
       if (p) {
         pending.delete(msg.requestId);
+        clearRouted(msg.requestId);
         p.resolve({ txHash: msg.txHash });
         watchTransaction(p.tabId, msg.txHash, msg.scanApiDomain, msg.address);
       }

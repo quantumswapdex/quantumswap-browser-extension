@@ -3,6 +3,7 @@
 // from the legacy fixture.
 import { el } from "../ui/dom";
 import type { ScreenModule } from "../ui/screens";
+import { OpenUrl } from "../lib/bridge";
 import { closeBurgerMenu, showSettingsScreen, showWalletListScreen, toggleBurgerMenu } from "../app/app";
 import { showNetworkDialog } from "../app/dialog";
 import { DROPDOWN_TEXT, networkStore } from "../app/state";
@@ -39,6 +40,13 @@ function burgerItem(id: string, tabindex: string, iconSrc: string, iconAlt: stri
     ]);
 }
 
+// External-site link in the burger menu (opens in a new tab; no icon).
+function burgerLinkItem(id: string, tabindex: string, label: string, url: string): HTMLElement {
+    return el("div", { class: "burger-item", id, role: "button", tabindex, onclick: () => { closeBurgerMenu(); void OpenUrl(url); } }, [
+        el("div", { class: "tab-name" }, [label]),
+    ]);
+}
+
 function buildHeader(): HTMLElement {
     const networkChip = el("span", { class: "networkbox", id: "spnNetwork" }, ["MAINNET" + DROPDOWN_TEXT]);
     networkStore.subscribe(() => {
@@ -70,6 +78,11 @@ function buildHeader(): HTMLElement {
                 el("div", { class: "burger-separator" }),
                 burgerItem("tab1", "14", "assets/svg/wallet-outline.svg", "Wallets Icon", "wallets", "Wallets", showWalletListScreen),
                 burgerItem("tab4", "15", "assets/svg/settings.svg", "Settings Icon", "settings", "Settings", showSettingsScreen),
+                el("div", { class: "burger-separator" }),
+                // External sites (brand names; not localized, no icons).
+                burgerLinkItem("burgerLinkBuilder", "16", "Builder", "https://builder.quantumcoin.org"),
+                burgerLinkItem("burgerLinkQuantumSwap", "17", "QuantumSwap", "https://app.quantumswap.com"),
+                burgerLinkItem("burgerLinkQuantumCoin", "18", "QuantumCoin", "https://quantumcoin.org"),
             ]),
         ]),
         el("div", { class: "dropdown", id: "divNetworkDropdown", role: "button", tabindex: "1000", style: "display:none;", onclick: () => { void showNetworkDialog(); } }, [

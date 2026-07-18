@@ -486,6 +486,28 @@ img[src*="eye-off-outline"]:focus {
     color: #ffffff;
 }
 
+/* Spoof Buster unlock slider: same glassy card treatment as the dialogs so it
+   blends with the dark theme (base rule in styles.css is white for the legacy
+   theme). */
+.spoof-unlock-slider {
+    background: var(--card-gradient);
+    color: var(--text);
+    border-top: 1px solid rgba(155, 115, 255, 0.55);
+    box-shadow: 0 -12px 40px -12px rgba(108, 59, 255, 0.45), 0 -24px 60px -20px rgba(0, 0, 0, 0.9);
+}
+
+.spoof-unlock-slider .spoof-slider-title {
+    color: var(--text);
+}
+
+.spoof-slider-close {
+    color: var(--muted);
+}
+
+.spoof-slider-close:hover {
+    color: #ffffff;
+}
+
 #divLoadingModalIcon img,
 #imgSendCompletedStatus {
     border-radius: 10px;

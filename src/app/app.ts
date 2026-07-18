@@ -86,6 +86,15 @@ import { swapReleasesInit, swapReleasesLoadAll } from "../lib/release";
 import { refreshCurrentSwapRelease, setCustomReleaseBannerAllowed } from "./release";
 import { setTokenListLoading } from "./token-list-state";
 import { qcNotifyActiveAccountChanged, qcNotifyActiveNetworkChanged, qcSessionClearAddress, qcSessionSetAddress } from "../platform/extension";
+import { el, t } from "../ui/dom";
+import {
+    generateSpoofBusterWords,
+    pickDecoyWords,
+    renderSpoofBusterWords,
+    showSpoofUnlockSlider,
+    spoofBusterSave,
+    spoofRandomInt,
+} from "./spoofbuster";
 
 export function checkDuplicateIds(): void {
     const nodes = document.querySelectorAll("[id]");
@@ -424,16 +433,40 @@ export function displayInfoStep(step: number): void {
         const totalSteps = langJson.info.length;
         const jsonData = langJson.info[step - 1];
 
+        byId("infoContainer").style.display = "block";
+        byId("divSpoofWordsPanel").style.display = "none";
         byId("welcomeText").textContent = langJson.infoStep.replace("[STEP]", String(step)).replace("[TOTAL_STEPS]", String(totalSteps));
         byId("divInfoPanelTitle").textContent = jsonData.title;
         byId("divInfoPanelDetail").textContent = jsonData.desc.replace(STORAGE_PATH_TEMPLATE, walletStore.STORAGE_PATH);
     }
 }
 
+// The three Spoof Buster words generated on the last welcome step. Kept in
+// memory for the final quiz step; persisted (unencrypted) via spoofBusterSave.
+let onboardingSpoofWords: string[] | null = null;
+let spoofQuizChoices: string[][] = [];
+let spoofQuizCorrectChoice = 0;
+
+// Last welcome step: generate + save the Spoof Buster words and explain them.
+// Regenerated every time onboarding reaches this step (restart-safe; nothing
+// references the previous words before wallet creation completes).
+export async function displaySpoofWordsStep(): Promise<void> {
+    const words = generateSpoofBusterWords();
+    await spoofBusterSave(words);
+    onboardingSpoofWords = words;
+
+    byId("welcomeText").textContent = t("spoof-onboarding-header");
+    byId("infoContainer").style.display = "none";
+    byId("divSpoofWordsPanel").style.display = "block";
+    renderSpoofBusterWords(byId("divSpoofWordsOnboarding"), words);
+}
+
 export function nextInfoStep(): void {
     if (onboardingStore.currentInfoStep < langJson.info.length) {
         onboardingStore.currentInfoStep++;
         displayInfoStep(onboardingStore.currentInfoStep);
+    } else if (byId("divSpoofWordsPanel").style.display === "none") {
+        void displaySpoofWordsStep();
     } else {
         displayQuizStep();
     }
@@ -447,15 +480,20 @@ export function showCreateWalletPasswordScreen(): void {
 }
 
 export function displayQuizStep(): void {
-    if (onboardingStore.currentQuizStep > langJson.quiz.length) {
+    // One synthetic step (the Spoof Buster words check) follows the JSON steps.
+    if (onboardingStore.currentQuizStep > langJson.quiz.length + 1) {
         showCreateWalletPasswordScreen();
+        return;
+    }
+    if (onboardingStore.currentQuizStep === langJson.quiz.length + 1) {
+        displaySpoofQuizStep();
         return;
     }
 
     byId("welcomeScreen").style.display = "none";
     byId("quizScreen").style.display = "block";
 
-    const totalSteps = langJson.quiz.length;
+    const totalSteps = langJson.quiz.length + 1;
     const quizData = langJson.quiz[onboardingStore.currentQuizStep - 1];
 
     byId("divSafetyQuizTitle").textContent = langJson.quizStep.replace("[STEP]", String(onboardingStore.currentQuizStep)).replace("[TOTAL_STEPS]", String(totalSteps));
@@ -483,6 +521,52 @@ export function displayQuizStep(): void {
     }
 }
 
+// Synthetic final quiz step: "Which are your Spoof Buster Words?" with three
+// full word-set choices (one real, two decoy), each rendered as the colorful
+// chips they will appear as in the UI. Re-called on a wrong answer, which
+// reshuffles the sets.
+export function displaySpoofQuizStep(): void {
+    const realWords = onboardingSpoofWords;
+    if (realWords == null) {
+        // Unreachable in the normal flow (the last welcome step always
+        // generates the words); keep the flow unblocked regardless.
+        showCreateWalletPasswordScreen();
+        return;
+    }
+
+    byId("welcomeScreen").style.display = "none";
+    byId("quizScreen").style.display = "block";
+
+    const totalSteps = langJson.quiz.length + 1;
+    byId("divSafetyQuizTitle").textContent = langJson.quizStep.replace("[STEP]", String(totalSteps)).replace("[TOTAL_STEPS]", String(totalSteps));
+    byId("divSafetyQuizSubTitle").textContent = t("spoof-quiz-subtitle");
+    byId("divSafetyQuizQuestion").textContent = t("spoof-quiz-question");
+
+    spoofQuizCorrectChoice = spoofRandomInt(3) + 1; // 1-based, like quizData.correctChoice
+    spoofQuizChoices = [];
+    for (let i = 1; i <= 3; i++) {
+        spoofQuizChoices.push(i === spoofQuizCorrectChoice ? realWords : pickDecoyWords(realWords, realWords.length));
+    }
+
+    const quizForm = byId("quizForm");
+    removeAllChildren(quizForm);
+    const choiceNode = byId("lblSafetyQuizChoice");
+    const templateInput = choiceNode.querySelector("input") as HTMLInputElement;
+    if (templateInput.getAttribute("tabindex") === TAB_INDEX_TEMPLATE) {
+        templateInput.setAttribute("tabindex", "350");
+    }
+    for (let i = 0; i < spoofQuizChoices.length; i++) {
+        const choiceCloneNode = choiceNode.cloneNode(true) as HTMLElement;
+        choiceCloneNode.id = "choice" + i;
+        const wordsRow = el("span", { class: "spoof-words-row", style: "display:inline-flex; margin:0 0 0 6px; vertical-align:middle;" });
+        renderSpoofBusterWords(wordsRow, spoofQuizChoices[i]);
+        choiceCloneNode.appendChild(wordsRow);
+        (choiceCloneNode.getElementsByClassName("safety_quiz_option")[0] as HTMLInputElement).value = String(i + 1);
+        choiceCloneNode.style.display = "block";
+        quizForm.appendChild(choiceCloneNode);
+    }
+}
+
 export function submitQuizForm(): void {
     const radioButtons = document.querySelectorAll<HTMLInputElement>('input[name="quiz_option"]');
     let selectedValue = "";
@@ -492,6 +576,17 @@ export function submitQuizForm(): void {
         }
     });
     if (selectedValue !== "") {
+        if (onboardingStore.currentQuizStep === langJson.quiz.length + 1) {
+            // Spoof Buster words step.
+            if (selectedValue === String(spoofQuizCorrectChoice)) {
+                onboardingStore.currentQuizStep = onboardingStore.currentQuizStep + 1;
+                showAlertAndExecuteOnClose(t("spoof-quiz-correct"), displayQuizStep);
+            } else {
+                displaySpoofQuizStep();
+                showWarnAlert(t("spoof-quiz-wrong"));
+            }
+            return;
+        }
         const quizData = langJson.quiz[onboardingStore.currentQuizStep - 1];
         if (quizData == null) {
             showWarnAlert(langJson.quizNoChoice);
@@ -1409,6 +1504,7 @@ export async function decryptAndUnlockWallet(): Promise<boolean | void> {
         byId("unlockScreen").style.display = "none";
         onboardingStore.additionalWalletMode = true;
         setWalletAddressAndShowWalletScreen(walletAddress);
+        void showSpoofUnlockSlider();
     }
     catch (error) {
         hideWaitingBox();
