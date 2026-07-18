@@ -23,31 +23,23 @@ button, input[type="submit"], input[type="reset"] {
     outline: inherit;
 }
 
+/* Header band. The brand (logo + wordmark) is centered horizontally and
+   pinned to the top row: app.ts grows this band inline (116/224px per screen)
+   and the fixed burger/network controls live on that first row. Colors are
+   per-theme (theme-quantum.css overrides background/border/shadow). */
 .gradient {
     width: 100%;
-    height: 116px;
+    height: 64px;
     background: black;
     box-shadow: 5px 5px 7px rgba(0, 0, 0, 0.3);
-    top: 15px;
-}
-
-/* Standout warning strip shown above the logo whenever a non-built-in swap
-   release is active (see updateCustomReleaseBanner in js/app.js). */
-.custom-release-banner {
-    width: 100%;
+    display: flex;
+    justify-content: center;
+    align-content: flex-start;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 12px;
+    padding: 8px 20px 0;
     box-sizing: border-box;
-    background: #ff9800;
-    color: #1a1a1a;
-    font-weight: 700;
-    font-size: 13px;
-    letter-spacing: 0.06em;
-    text-align: center;
-    text-transform: uppercase;
-    padding: 4px 8px;
-    border-bottom: 2px solid #b26500;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
 }
 
 .logo,
@@ -59,14 +51,15 @@ button, input[type="submit"], input[type="reset"] {
     position: relative;
     overflow: hidden;
     text-align: center;
-    margin-left: auto;
-    margin-right: auto;
-    padding-top: 10px;
+    flex: 0 0 auto;
+    margin: 0;
+    padding: 0;
 }
 
 .logoimg {
-    width: 64px;
-    height: 64px;
+    display: block;
+    width: 34px;
+    height: 34px;
 }
 
 .mainheading {
@@ -135,18 +128,9 @@ button, input[type="submit"], input[type="reset"] {
     opacity: 1;
 }
 
-.tab-bar {
-    display: flex;
-    position: fixed;
-    left: 0;
-    bottom: 0;
-    width: 100%;
-    text-align: center;
-    padding: 10px;
-}
-
 /* Top-left burger menu (replaces the old bottom tab bar). Fixed so it overlays
-   the header; lives inside #main-content so it only shows on wallet screens. */
+   the header; hidden (display:none, toggled by setWalletMenuEnabled) until a
+   wallet is unlocked. */
 .burger-menu {
     position: fixed;
     left: 6px;
@@ -209,21 +193,6 @@ button, input[type="submit"], input[type="reset"] {
 .burger-item:active {
     background: #f2edff;
     color: #6610f2;
-}
-
-/* Wallets/Settings stay grayed out and unclickable until a wallet is unlocked;
-   the surface item matching the current view is also disabled. */
-.burger-item.disabled {
-    opacity: 0.4;
-    pointer-events: none;
-    cursor: default;
-}
-
-/* Divider between the surface controls and the Wallets/Settings entries. */
-.burger-separator {
-    height: 1px;
-    background: #e6e6e6;
-    margin: 6px 8px;
 }
 
 .burger-item .tab-name {
@@ -604,6 +573,13 @@ button, input[type="submit"], input[type="reset"] {
     position: relative;
 }
 
+/* Show/hide-password eye toggles sit in flex rows beside their textbox;
+   block display removes the inline-image baseline gap so align-items:center
+   lands exactly on the textbox middle. */
+img[alt="Show Password"] {
+    display: block;
+}
+
 .large_button_container,
 .large_button_container * {
     box-sizing: border-box;
@@ -890,7 +866,6 @@ button, input[type="submit"], input[type="reset"] {
     border: 1px solid #888;
     width: 80%; 
     border-radius: 15px;
-    max-width:600px;
 }
 
 .close {
@@ -1021,6 +996,8 @@ button, input[type="submit"], input[type="reset"] {
         box-shadow: rgba(50, 50, 93, 0.25) 0px 30px 60px -12px inset, rgba(0, 0, 0, 0.3) 0px 18px 36px -18px inset;
     }
 
+/* Wordmark sits beside the logo in the top-bar brand row (layout shared by
+   both themes); the gradient text / animation is per-theme. */
 .animate-character {
     background-image: linear-gradient( -225deg, #ffffff 2%, #ffffff 29%, #000000 47%, #ececec 100% );
     background-size: auto auto;
@@ -1032,18 +1009,14 @@ button, input[type="submit"], input[type="reset"] {
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     animation: textclip 3s linear infinite;
-    display: inline-block;
-    text-align: center;
-    vertical-align: middle;
-    display: table-cell;
-    text-align: center;
-    vertical-align: middle;
+    display: block;
+    text-align: left;
     font-family: Nunito Sans,sans-serif !important;
-    font-size: 24px;
+    font-size: 21px;
     font-weight: 900 !important;
     color: #5f00ff;
-    margin: auto;
-    width: 0.1%;
+    margin: 0;
+    width: auto;
 }
 
 table {
@@ -1482,20 +1455,7 @@ select {
 }
 
 .seedwrapper {
-    flex: 1 1 auto;
-    min-height: 0;
-    max-height: calc(100vh - 330px);
-    overflow-y: auto;
-    overflow-x: auto;
-}
-
-/* Seed screens: bound the white card to the viewport so the seed grid scrolls
-   inside it instead of overflowing (notably in the taller docked/detached
-   surfaces). The min-height:0 above is required because a flex item defaults to
-   min-height:auto (its full content height), which would otherwise override the
-   max-height and prevent the grid from ever clipping/scrolling. */
-.roundex-box-middle:has(.seedwrapper) {
-    max-height: calc(100vh - 150px);
+    height: calc(100vh - 330px);
 }
 
 .buttonBox {
@@ -1516,20 +1476,6 @@ select {
     .buttonBox:active {
         color: #6610f2;
     }
-
-.tabbutton {
-    flex: 1;
-    text-align: center;
-    cursor: pointer;
-    color: #000000;
-}
-
-    .tabbutton:hover,
-    .tabbutton:active {
-        transform: translateY(-2px);
-        color: #6610f2;
-    }
-
 
 .prev-container {
     width: 50px;
@@ -1608,16 +1554,7 @@ select {
     }
 
 .blocks-content {
-    max-height: calc(100vh - 360px);
-}
-
-/* Bounds a wallet screen's inner card to the space below the fixed header so a
-   vertical scrollbar appears dynamically when its content overflows (notably in
-   the fixed-height overlay popup). Viewport-based so it also works when docked. */
-.screen-scroll-box {
-    max-height: calc(100vh - 170px);
-    overflow-y: auto;
-    overflow-x: auto;
+    max-height: calc(100vh - 285px);
 }
 
 
@@ -1646,4 +1583,11 @@ select {
 .selectbox:focus {
     border-color: #000000;
     border-style: outset;
+}
+
+/* Extension burger-menu separator (surface controls above Wallets/Settings). */
+.burger-separator {
+    height: 1px;
+    background: #e6e6e6;
+    margin: 6px 8px;
 }

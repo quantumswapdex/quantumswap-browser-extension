@@ -1,9 +1,10 @@
 import { defineConfig } from "wxt";
 
-// The full wallet UI (HTML/CSS/JS/assets) lives verbatim in `public/` and is
-// served as the popup via `action.default_popup`. The post-quantum WASM SDK
+// The wallet UI is built from the TypeScript entrypoints (entrypoints/index for
+// the wallet surfaces, entrypoints/approve for the dApp approval popup); static
+// assets (CSS/fonts/icons/json) live in `public/`. The post-quantum WASM SDK
 // bundle is produced by `scripts/build-bridge.mjs` into `public/platform-bridge.js`
-// and loaded as the first classic script inside `public/index.html`.
+// and loaded as the first classic script inside each entrypoint HTML.
 export default defineConfig({
   // The default esbuild target lowers object-rest destructuring used by WXT's
   // content-script wrapper below what esbuild can transform. Pin a modern target
