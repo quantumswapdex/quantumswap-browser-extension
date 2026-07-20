@@ -807,7 +807,10 @@ export async function populateRestoreSeedAutoComplete(wordCount: number): Promis
         for (let i = 0; i < SEED_FRIENDLY_INDEX_ARRAY.length; i++) {
             const box = byId("txtRestoreSeed" + SEED_FRIENDLY_INDEX_ARRAY[i].toUpperCase());
             const myAutoComplete = new AutoCompleteDropdownControl(box);
-            box.tabIndex = i + 1;
+            // Grid uses 20..67, above the header's burger button (tabindex 9)
+            // and menu items (10-19), so tabbing between words never detours
+            // into the header. The screen's Next/back follow at 68/69.
+            box.tabIndex = i + 20;
             myAutoComplete.limitToList = true;
             myAutoComplete.optionValues = seedWordList;
             myAutoComplete.initialize();
@@ -890,7 +893,10 @@ export async function populateVerifySeedAutoComplete(wordCount: number): Promise
         for (let i = 0; i < SEED_FRIENDLY_INDEX_ARRAY.length; i++) {
             const box = byId("txtSeed" + SEED_FRIENDLY_INDEX_ARRAY[i].toUpperCase());
             const myAutoComplete = new AutoCompleteDropdownControl(box);
-            box.tabIndex = i + 1;
+            // Grid uses 20..67, above the header's burger button (tabindex 9)
+            // and menu items (10-19), so tabbing between words never detours
+            // into the header. The screen's Next/back follow at 68/69.
+            box.tabIndex = i + 20;
             myAutoComplete.limitToList = true;
             myAutoComplete.optionValues = seedWordList;
             myAutoComplete.initialize();

@@ -263,7 +263,7 @@ function buildSeedVerifyScreen(): HTMLElement {
     return el("div", { class: "content", id: "seedVerifyScreen", style: "display: none;" }, [
         el("div", { class: "center-content" }, [
             el("div", { class: "center-content-rounded-container", style: "width:95%;" }, [
-                el("div", { class: "back-container", role: "button", tabindex: "50", onclick: () => backToSeedScreen() }),
+                el("div", { class: "back-container", role: "button", tabindex: "69", onclick: () => backToSeedScreen() }),
                 el("div", { class: "roundex-box-middle", style: "padding-top: 15px; padding-bottom: 15px;" }, [
                     el("div", {}, [
                         el("div", { class: "heading large", style: "float:left;width:fit-content;", "data-lang-key": "verify-seed-words" }, ["Verify Seed Words"]),
@@ -277,7 +277,7 @@ function buildSeedVerifyScreen(): HTMLElement {
                         ]),
                     ]),
                     el("div", { class: "divider" }),
-                    el("div", { class: "large_button_container heading large", style: "float:right;", id: "divVerifySeedButton", "data-lang-key": "next", role: "button", tabindex: "49", onclick: () => { void verifySeedWords(); } }, ["Next"]),
+                    el("div", { class: "large_button_container heading large", style: "float:right;", id: "divVerifySeedButton", "data-lang-key": "next", role: "button", tabindex: "68", onclick: () => { void verifySeedWords(); } }, ["Next"]),
                 ]),
             ]),
         ]),
@@ -311,7 +311,7 @@ function buildRestoreSeedScreen(): HTMLElement {
     return el("div", { class: "content", id: "restoreSeedScreen", style: "display: none;" }, [
         el("div", { class: "center-content" }, [
             el("div", { class: "center-content-rounded-container", style: "width:95%;" }, [
-                el("div", { class: "back-container", role: "button", tabindex: "50", onclick: () => backFromRestoreSeedScreen() }),
+                el("div", { class: "back-container", role: "button", tabindex: "69", onclick: () => backFromRestoreSeedScreen() }),
                 el("div", { class: "roundex-box-middle", style: "padding-top: 15px; padding-bottom: 15px;" }, [
                     el("div", {}, [
                         el("div", { class: "heading large", style: "float:left;width:fit-content;", "data-lang-key": "restore-wallet-from-seed" }, ["Restore Wallet From Seed Words"]),
@@ -325,7 +325,7 @@ function buildRestoreSeedScreen(): HTMLElement {
                         ]),
                     ]),
                     el("div", { class: "divider" }),
-                    el("div", { class: "large_button_container heading large", style: "float:right;", id: "divRestoreSeedButton", "data-lang-key": "next", role: "button", tabindex: "49", onclick: () => { void restoreSeed(); } }, ["Next"]),
+                    el("div", { class: "large_button_container heading large", style: "float:right;", id: "divRestoreSeedButton", "data-lang-key": "next", role: "button", tabindex: "68", onclick: () => { void restoreSeed(); } }, ["Next"]),
                 ]),
             ]),
         ]),
