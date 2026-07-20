@@ -4,7 +4,7 @@
   "version": "1.2.6",
   "private": true,
   "type": "module",
-  "description": "QuantumSwap Browser Extension for Chrome and Firefox",
+  "description": "Self-custody QuantumCoin wallet with token swaps, dApp connectivity, and quantum-resistant security.",
   "author": "QuantumSwap Community",
   "license": "MIT",
   "scripts": {
