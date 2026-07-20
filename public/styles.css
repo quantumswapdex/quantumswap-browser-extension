@@ -1459,8 +1459,23 @@ select {
     align-self: center;
 }
 
+/* Size the seed grid from the remaining space inside the flex card instead of
+   the viewport: the card's maxHeight (set by resizeBoxes from screen.height)
+   and 100vh routinely disagree, and a fixed vh height painted the grid past
+   the card border. flex:1 1 auto also overrides .input_container's
+   flex-shrink:0 so the panel can shrink and scroll (it has overflow:auto). */
 .seedwrapper {
-    height: calc(100vh - 330px);
+    flex: 1 1 auto;
+    min-height: 0;
+    max-height: calc(100vh - 330px);
+}
+
+/* The copy/Next row holds only floated children; without a clearfix its height
+   collapses to 0 and the buttons paint below the card's bottom border. */
+#divNewSeedButtons::after {
+    content: "";
+    display: block;
+    clear: both;
 }
 
 .buttonBox {

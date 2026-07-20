@@ -515,6 +515,55 @@ async function buildEstimateGasTx(data: any, provider: any): Promise<any> {
 }
 
 export default {
+  // On-chain metadata (name/symbol/decimals + owner balance) for a token contract
+  // entered manually in the token picker. The returned strings are untrusted RPC
+  // data; the caller (resolveManualTokenMetadata) sanitizes before display.
+  async SwapTokenGetMetadata(data: any) {
+    try {
+      const chainId = Number(data.chainId);
+      if (!Number.isInteger(chainId)) return { success: false, error: "Invalid chain ID" };
+
+      const provider = createQuantumRpcProvider(data.rpcEndpoint, chainId);
+      if (!provider) return { success: false, error: "Invalid RPC endpoint" };
+
+      await Initialize(new Config(chainId, initRpcUrlForConfig(data.rpcEndpoint)));
+      const contractAddress = getAddress(String(data.contractAddress || "").trim());
+      const token = IERC20.connect(contractAddress, provider);
+
+      const [name, symbol, decimalsRaw] = await Promise.all([
+        token.name().catch(() => ""),
+        token.symbol(),
+        token.decimals(),
+      ]);
+      const decimals = Number(decimalsRaw);
+      if (!Number.isInteger(decimals) || decimals < 0 || decimals > 36) {
+        return { success: false, error: "The contract does not expose valid token metadata." };
+      }
+
+      let balance = "0";
+      if (data.ownerAddress) {
+        try {
+          const balanceWei = await token.balanceOf(getAddress(String(data.ownerAddress)));
+          balance = formatUnits(balanceWei, decimals);
+        } catch {
+          /* balance is informational; keep "0" on failure */
+        }
+      }
+
+      return {
+        success: true,
+        contractAddress,
+        name: typeof name === "string" ? name : "",
+        symbol: typeof symbol === "string" ? symbol : "",
+        decimals,
+        balance,
+        error: null,
+      };
+    } catch (err) {
+      return { success: false, error: sanitizeSwapError(err) };
+    }
+  },
+
   async SwapQuoteGetAmountsOut(data: any) {
     try {
       const chainId = Number(data.chainId);
