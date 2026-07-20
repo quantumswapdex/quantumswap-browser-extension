@@ -19,6 +19,12 @@ WebAssembly SDK runs.
 - [Architecture](#architecture)
   - [Why a separate esbuild step?](#why-a-separate-esbuild-step)
 - [Spoof Buster Words](#spoof-buster-words)
+  - [What it is](#what-it-is)
+  - [Why it is needed](#why-it-is-needed)
+  - [How it works](#how-it-works)
+  - [Random training rounds (1-in-10 sampling)](#random-training-rounds-1-in-10-sampling)
+  - [Negative cases (what happens when the check fails)](#negative-cases-what-happens-when-the-check-fails)
+  - [Storage](#storage)
 - [dApp approval flow (side panel)](#dapp-approval-flow-side-panel)
 - [Building a dApp](#building-a-dapp)
 - [Prerequisites](#prerequisites)
@@ -35,7 +41,7 @@ WebAssembly SDK runs.
 
 ## Architecture
 
-The desktop app has a clean split we exploit: the renderer only ever calls
+The desktop app has a clean split we make use of: the renderer only ever calls
 `SomeApi.send(channel, data)` / `StorageApi.Get/SetItem`, never Node directly. The
 renderer is ported to the extension as native TypeScript (same screen modules,
 app controllers and lib layers as the desktop `src/`), and only the transport +
@@ -106,25 +112,93 @@ graph, and guarantees the `*Api` globals exist before any renderer module runs.
 
 ## Spoof Buster Words
 
-An anti-phishing mechanism unique to this wallet. During onboarding the wallet
-generates **three random words** (from the BIP-39 English wordlist), shows them
-as colored chips on the last welcome step, and quizzes the user on them in the
-final safety-quiz step. The words are the secret; the chip colors are fixed and
-identical for all users.
+### What it is
 
-- **Every genuine wallet request window shows the words first.** Before any
-  dApp approval renders, a gate asks the user to confirm that the three words
-  shown are theirs. A spoofed (fake) window cannot know the words, so a
-  mismatch — or no words at all — means the window is fake and must be closed.
-- **Training rounds.** Roughly 1 approval in 10 is a drill (the request is
-  rejected either way): method A shows decoy words to practice catching a
-  mismatch; method B skips the gate entirely, simulating a spoofed window, and
-  educates the user if they engage with the password field or approve buttons.
-- **Recall aids.** A slide-up banner re-shows the words after every unlock, and
-  **Settings > Spoof Buster Words** displays them on demand.
-- **Storage.** The words are stored locally, unencrypted by design (they must be
-  shown before unlock). They never leave the device and are not related to the
-  seed or password.
+An anti-phishing mechanism unique to this wallet. During onboarding the wallet
+generates **three random words** (from the 2048-word BIP-39 English wordlist),
+shows them as colored chips on the last welcome step, and quizzes the user on
+them in the final safety-quiz step. The words are the secret; the chip colors
+are position-based, fixed and identical for all users — purely a
+readability/recognition aid.
+
+### Why it is needed
+
+A malicious website can open a window (or draw an overlay) that pixel-perfectly
+imitates the wallet's approval popup and harvest the password the user types
+into it. What a fake window **cannot** do is read this extension's local
+storage — so it cannot know the user's three words. Showing the words at the
+start of every genuine approval gives the user a proof-of-authenticity check
+that no look-alike window can pass: wrong words, or no words at all, mean the
+window is fake.
+
+### How it works
+
+Before any dApp approval renders (connect, sign message, send transaction), a
+gate shows three word chips and a single consciously-selected option:
+
+1. The user compares the chips against their memorized words.
+2. If they match, the user ticks **"Correct - these are my words"** (unchecked
+   by default; there is deliberately no "Incorrect" option) and clicks
+   **Next**. Only then does the actual approval screen render.
+3. If they do **not** match, the explanation under the option instructs the
+   user to **close the side panel immediately** — the only safe response to a
+   suspected fake window, and the same muscle memory that protects them against
+   a real spoof. Closing the panel makes the background broker auto-reject the
+   pending request.
+
+Clicking **Next** without ticking the box does not proceed; it re-states the
+instruction (select Correct, or close the panel if the words are wrong).
+
+To keep the words fresh in memory, a slide-up banner re-shows them after every
+unlock, and **Settings > Spoof Buster Words** displays them on demand.
+
+### Random training rounds (1-in-10 sampling)
+
+Users get no practice against an attack they have never seen, so the wallet
+drills them: **each approval has a 1-in-10 chance** (uniform, via a
+rejection-sampled `crypto.getRandomValues` roll — see `spoofRandomInt` in
+`src/app/spoofbuster.ts`) of being a training round instead of a real gate. A
+training round then splits 50/50 between two methods:
+
+- **Method A — decoy words.** The gate renders normally but shows three random
+  words that are guaranteed not to be the user's (drawn from the wordlist
+  excluding the real words). The right response is the trained one: close the
+  panel.
+- **Method B — no gate at all.** The approval screen renders directly, exactly
+  what a spoofed window would do. The right response is to notice the missing
+  word check and reject or close without engaging.
+
+Every training round rejects the dApp request regardless of what the user does;
+the user simply retries the action on the dApp (this is why the example-page
+instructions say "roughly 1 in 10 approvals is a drill — just retry").
+
+### Negative cases (what happens when the check fails)
+
+- **Method A, user confirms decoy words:** the mistake being taught. An
+  educational dialog explains that the words shown were not theirs and that a
+  mismatch means the window is fake. The dialog **cannot be dismissed** — it
+  has no OK button and blocks Escape — and instructs the user to close the
+  extension window and reopen it from the toolbar. The request is rejected the
+  moment the dialog appears. Falling through to any wallet/unlock UI is
+  deliberately impossible: landing on a password prompt right after a failed
+  word check is exactly what a spoofed flow would want next.
+- **Method B, user engages:** touching the password field or clicking Approve
+  on the gate-less screen triggers the same non-dismissable educational dialog
+  ("never enter your password unless you saw and confirmed your words first").
+  Clicking Reject instead shows a "good catch" confirmation (also terminal).
+- **Real round, words don't match:** there is no in-UI path — the user closes
+  the panel as instructed, and the background auto-rejects the request. If they
+  are unsure of their words, they can unlock the wallet afterwards and check
+  **Settings > Spoof Buster Words**.
+- **Closing the surface at any point** without acting rejects the pending
+  request; nothing is ever approved by default.
+
+### Storage
+
+The words are stored locally, unencrypted **by design**: they gate nothing
+cryptographic and must be displayable before unlock (only the words themselves
+are secret, from websites — not from the device owner). They never leave the
+device and are unrelated to the seed phrase or password.
 
 ## dApp approval flow (side panel)
 

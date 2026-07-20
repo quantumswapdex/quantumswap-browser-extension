@@ -25,10 +25,10 @@ export const MAX_SWAP_RELEASE_NAME_LENGTH = 60;
 // the main process is a separate TypeScript project; keep the two in sync.
 export const BUILTIN_SWAP_RELEASES = [
     {
-        name: "Beta 1",
-        wq: "0x0E49c26cd1ca19bF8ddA2C8985B96783288458754757F4C9E00a5439A7291628",
-        factory: "0xbbF45a1B60044669793B444eD01Eb33e03Bb8cf3c5b6ae7887B218D05C5Cbf1d",
-        router: "0x41323EF72662185f44a03ea0ad8094a0C9e925aB1102679D8e957e838054aac5",
+        name: "Beta 2",
+        wq: "0x45BD01BE5EF8509D9dA183689eA7Faf647331c54c7C9801dE54c9EDE9Ac44D92",
+        factory: "0x95085766E20fCBf0106dC7037020Ca069e22080DBEF2615551Bab65D59a99754",
+        router: "0xC3666584A70A707E5e929Ba9871083ED8f9528eCe7a56FdbA485272a645D861e",
         builtin: true,
     },
 ];

@@ -95,7 +95,7 @@ function buildYesNoDialog(): HTMLElement {
         el("div", { class: "modal-content" }, [
             el("div", { style: "margin-bottom:20px;" }, [
                 el("p", { id: "pDetailsYesNo", style: "font-weight:bold;overflow:auto", class: "scrollbar", tabindex: "4" }),
-                el("div", { style: "margin-top:20px;display:flex;gap:15px;justify-content:center;" }, [
+                el("div", { style: "margin-top:35px;display:flex;gap:15px;justify-content:center;" }, [
                     el("button", { class: "cancel", "data-lang-key": "no", role: "button", tabindex: "2", id: "btnYesNoNo" }, ["No"]),
                     el("button", { class: "proceed", "data-lang-key": "yes", role: "button", tabindex: "1", id: "btnYesNoYes" }, ["Yes"]),
                 ]),

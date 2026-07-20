@@ -113,12 +113,11 @@ function buildSpoofGateCard(): HTMLElement {
                 el("div", { class: "spoof-words-row", id: "dappSpoofWords" }),
                 el("div", { style: "margin-top:10px; text-align:left; display:flex; flex-direction:column; gap:8px;" }, [
                     el("label", { class: "tab-label", style: "cursor:pointer;" }, [
-                        el("input", { type: "radio", name: "spoof_gate_option", value: "correct", id: "optSpoofCorrect", tabindex: "1" }),
+                        el("input", { type: "checkbox", name: "spoof_gate_option", value: "correct", id: "optSpoofCorrect", tabindex: "1" }),
                         el("span", { "data-lang-key": "spoof-gate-correct" }, ["Correct - these are my words"]),
                     ]),
-                    el("label", { class: "tab-label", style: "cursor:pointer;" }, [
-                        el("input", { type: "radio", name: "spoof_gate_option", value: "incorrect", id: "optSpoofIncorrect", tabindex: "2" }),
-                        el("span", { "data-lang-key": "spoof-gate-incorrect" }, ["Incorrect - these are not my words"]),
+                    el("div", { class: "heading medium", "data-lang-key": "spoof-gate-close-if-wrong", style: "text-align:left; white-space:normal; word-break:break-word;" }, [
+                        "If these are NOT your words, do not continue - close this side panel immediately. Only a fake window shows the wrong words.",
                     ]),
                 ]),
                 el("div", { id: "dappSpoofGateStatus", class: "heading medium", style: "margin-top:8px; text-align:left;" }),

@@ -509,10 +509,12 @@ function showErrorOnlyReject(message?: string | null): void {
 
 // ---- Spoof Buster gate + redirector modes ------------------------------
 // The genuine approval flow (side-panel hosted) starts with a gate showing the
-// user's Spoof Buster Words. 1 round in 10 is a training round: method A shows
-// decoy words, method B skips the gate entirely (simulating a spoofed window)
-// and educates on any engagement. Every training round rejects the dApp
-// request; the user retries the action on the dApp.
+// user's Spoof Buster Words. The only way past it is consciously confirming
+// "Correct - these are my words"; if the words are wrong the user is told to
+// close the side panel (the background broker auto-rejects on panel close).
+// 1 round in 10 is a training round: method A shows decoy words, method B
+// skips the gate entirely (simulating a spoofed window); both educate on any
+// engagement and reject the dApp request; the user retries on the dApp.
 
 type SpoofGateOutcome = "proceed" | "handled";
 
@@ -521,43 +523,41 @@ type SpoofGateOutcome = "proceed" | "handled";
 // real approval logic is never reachable.
 let spoofTrainingModeB = false;
 
-// OK-only dialog for training outcomes (mirrors showErrorOnlyReject): OK, or
-// closing the surface, rejects the request. `goodCatch` shows the success icon.
-function showSpoofTrainingDialog(message: string, goodCatch: boolean): void {
+// Terminal dialog for spoof training outcomes. The
+// dApp request is rejected immediately and the dialog CANNOT be dismissed:
+// there is no OK button and Escape is blocked. The user must close this
+// surface themselves and reopen it from the toolbar - never fall through to
+// the wallet unlock/password UI, which is exactly what a spoofed flow would
+// want next. `goodCatch` shows the success icon instead of the warning icon.
+function showSpoofFinalDialog(message: string, goodCatch: boolean, rejectReason: string): void {
     show("dappApprovalRoot", false);
     show("dappSpoofGateRoot", false);
+    // Settle the request right away; nothing can be approved past this point.
+    replyRejectRaw(rejectReason).catch(function () { /* background may be gone; port disconnect rejects */ });
+
     const p = el("pDetails");
-    if (p) p.textContent = message;
+    if (p) p.textContent = message + " " + t("spoof-close-reopen", "This dialog cannot be dismissed. Close the extension window now, then reopen it from the toolbar.");
     const warn = el("divWarn");
     if (warn) warn.style.display = goodCatch ? "none" : "";
     const succ = el("divSuccess");
     if (succ) succ.style.display = goodCatch ? "" : "none";
     const ok = el("divModalOk");
-    if (ok) ok.onclick = function () { replyReject("Spoof Buster training round").catch(function () { closeWindow(); }); };
+    if (ok) ok.style.display = "none";
     const d = el("modalOkDialog") as HTMLDialogElement | null;
-    if (d) { d.style.display = "block"; if (d.showModal) { try { d.showModal(); } catch { /* already open */ } } }
+    if (d) {
+        // Block Escape, and re-open if the dialog gets closed anyway.
+        d.addEventListener("cancel", function (e) { e.preventDefault(); });
+        d.addEventListener("close", function () {
+            d.style.display = "block";
+            try { d.showModal(); } catch { /* already open */ }
+        });
+        d.style.display = "block";
+        if (d.showModal) { try { d.showModal(); } catch { /* already open */ } }
+    }
 }
 
-// Normal round, words marked "Incorrect": fail closed. Reject the request,
-// explain, and close the WHOLE side panel - never fall through to the wallet
-// unlock/password UI, which is exactly what a spoofed flow would want next.
-function showSpoofMismatchDialog(): void {
-    show("dappApprovalRoot", false);
-    show("dappSpoofGateRoot", false);
-    const p = el("pDetails");
-    if (p) p.textContent = t("spoof-gate-mismatch", "The request was rejected. This side panel will now close - reopen it from the toolbar and try the request again. If you are unsure of your words, unlock your wallet and check Settings > Spoof Buster Words.");
-    const warn = el("divWarn");
-    if (warn) warn.style.display = "";
-    const succ = el("divSuccess");
-    if (succ) succ.style.display = "none";
-    const ok = el("divModalOk");
-    if (ok) ok.onclick = function () {
-        replyRejectRaw("Spoof check failed")
-            .catch(function () { /* background may be gone; port disconnect rejects */ })
-            .finally(function () { try { window.close(); } catch { /* ignore */ } });
-    };
-    const d = el("modalOkDialog") as HTMLDialogElement | null;
-    if (d) { d.style.display = "block"; if (d.showModal) { try { d.showModal(); } catch { /* already open */ } } }
+function showSpoofTrainingDialog(message: string, goodCatch: boolean): void {
+    showSpoofFinalDialog(message, goodCatch, "Spoof Buster training round");
 }
 
 function spoofTrainingBEducate(): void {
@@ -605,40 +605,25 @@ async function runSpoofGatePhase(): Promise<SpoofGateOutcome> {
         if (!nextBtn) { resolve("handled"); return; }
         nextBtn.onclick = function () {
             const correct = inputEl("optSpoofCorrect");
-            const incorrect = inputEl("optSpoofIncorrect");
-            const saidCorrect = !!(correct && correct.checked);
-            const saidIncorrect = !!(incorrect && incorrect.checked);
-            if (!saidCorrect && !saidIncorrect) {
+            if (!(correct && correct.checked)) {
                 const s = el("dappSpoofGateStatus");
-                if (s) s.textContent = t("spoof-gate-select-option", "Please select an option.");
+                if (s) s.textContent = t("spoof-gate-select-option", 'Select "Correct" to continue. If these are not your words, close this side panel instead.');
                 return;
             }
             if (isTraining) {
-                // Method A: the words shown are decoys.
-                if (saidIncorrect) {
-                    showSpoofTrainingDialog(
-                        t("spoof-training-a-good-catch", "Good catch - this was a training check. You should always close the window and try again if incorrect words are shown."),
-                        true,
-                    );
-                } else {
-                    showSpoofTrainingDialog(
-                        t("spoof-training-a-educate", "The words shown were NOT your Spoof Buster words. A mismatch means the window is fake - always close it and try again. This was a training check; the request was rejected."),
-                        false,
-                    );
-                }
+                // Method A: the words shown are decoys, so confirming them is
+                // the mistake being taught. (The good catch - closing the panel
+                // without engaging - is auto-rejected by the background broker.)
+                showSpoofTrainingDialog(
+                    t("spoof-training-a-educate", "The words shown were NOT your Spoof Buster words. A mismatch means the window is fake - always close it and try again. This was a training check; the request was rejected."),
+                    false,
+                );
                 resolve("handled");
                 return;
             }
-            if (saidCorrect) {
-                show("dappSpoofGateRoot", false);
-                show("dappApprovalRoot", true);
-                resolve("proceed");
-                return;
-            }
-            // Real words marked incorrect: fail closed with an explanation and
-            // close the side panel (no wallet/password UI after a mismatch).
-            showSpoofMismatchDialog();
-            resolve("handled");
+            show("dappSpoofGateRoot", false);
+            show("dappApprovalRoot", true);
+            resolve("proceed");
         };
     });
 }
