@@ -14,7 +14,7 @@ export default defineConfig({
   }),
   manifest: ({ browser }) => ({
     name: "QuantumSwap Browser Extension",
-    description: "QuantumSwap Wallet for Chrome and Firefox",
+    description: "Self-custody QuantumCoin wallet with token swaps, dApp connectivity, and quantum-resistant security.",
     // Icons generated from the Electron app logo (src/assets/svg/quantumswap.svg)
     // by scripts/build-icons.mjs -> public/icon/*.png.
     icons: {
