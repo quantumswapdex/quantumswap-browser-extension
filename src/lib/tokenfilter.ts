@@ -4,11 +4,13 @@
 // stablecoin-impersonator suppression (StablecoinImpersonatorFilter).
 // Recognition is by contract address only (not chainId-keyed). Symbol/name
 // are only used to detect stablecoin impersonators.
+import { RECOGNIZED_TOKEN_CONTRACT_ADDRESSES } from "../platform/token-constants";
 
-export const RECOGNIZED_TOKEN_ADDRESSES = new Set([
-    "0xe8ea8beb86e714ef2bde0afac17d6e45d1c35e48f312d6dc12c4fdb90d9e8a3d", // Heisen
-    "0xa8036870874fbed790ed4d3bbd41b2f390b9858ff021f2993e90c6d1cbb167c7"  // Y2Q
-]);
+// Derived from the single source of truth in src/platform/token-constants.ts
+// (Heisen, Y2Q, Lion, Tiger, Cat, panther) so the two lists cannot drift.
+export const RECOGNIZED_TOKEN_ADDRESSES = new Set(
+    RECOGNIZED_TOKEN_CONTRACT_ADDRESSES.map((address) => address.toLowerCase())
+);
 
 export const STABLECOIN_IMPERSONATOR_PATTERNS = [
     "usd", "dai", "tether", "stable", "stablecoin",
