@@ -603,6 +603,30 @@ async function runSpoofGatePhase(): Promise<SpoofGateOutcome> {
 
         const nextBtn = el("dappSpoofNextBtn");
         if (!nextBtn) { resolve("handled"); return; }
+
+        // Reject = "these words are incorrect". On a training round that is
+        // the right response (the words shown ARE decoys); on a normal round
+        // treat it as a suspected spoof: reject the request and lock the
+        // surface behind the terminal dialog either way.
+        const rejectBtn = el("dappSpoofRejectBtn");
+        if (rejectBtn) {
+            rejectBtn.onclick = function () {
+                if (isTraining) {
+                    showSpoofTrainingDialog(
+                        t("spoof-training-a-good-catch", "Good catch! The words shown were NOT your Spoof Buster words, so rejecting was the right response. This was a training check; the request was rejected."),
+                        true,
+                    );
+                } else {
+                    showSpoofFinalDialog(
+                        t("spoof-gate-rejected", "The request was rejected. If the words shown did not match your memorized Spoof Buster Words, this window may be fake. You can verify your saved words under Settings > Spoof Buster Words after unlocking your wallet."),
+                        false,
+                        "User rejected: Spoof Buster words reported as incorrect",
+                    );
+                }
+                resolve("handled");
+            };
+        }
+
         nextBtn.onclick = function () {
             const correct = inputEl("optSpoofCorrect");
             if (!(correct && correct.checked)) {

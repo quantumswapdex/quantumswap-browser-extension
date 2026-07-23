@@ -33,6 +33,13 @@ describe("impersonatesStablecoin", () => {
         expect(impersonatesStablecoin(null, "Fake Tether Token")).toBe(true);
     });
 
+    it("returns true for malicious brand impersonators", () => {
+        expect(impersonatesStablecoin("DOGEP", null)).toBe(true);
+        expect(impersonatesStablecoin(null, "Doge Protocol")).toBe(true);
+        expect(impersonatesStablecoin("QC", "QuantumCoin: The Original")).toBe(true);
+        expect(impersonatesStablecoin(null, "Quantum Coin")).toBe(true);
+    });
+
     it("returns false for unrelated tokens", () => {
         expect(impersonatesStablecoin("HEISEN", "Heisen Token")).toBe(false);
     });

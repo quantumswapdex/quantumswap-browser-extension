@@ -119,9 +119,13 @@ function buildSpoofGateCard(): HTMLElement {
                     el("div", { class: "heading medium", "data-lang-key": "spoof-gate-close-if-wrong", style: "text-align:left; white-space:normal; word-break:break-word;" }, [
                         "If these are NOT your words, do not continue - close this side panel immediately. Only a fake window shows the wrong words.",
                     ]),
+                    el("div", { class: "heading medium", "data-lang-key": "spoof-gate-reject-hint", style: "text-align:left; white-space:normal; word-break:break-word;" }, [
+                        "Click the Reject button if the words are incorrect.",
+                    ]),
                 ]),
                 el("div", { id: "dappSpoofGateStatus", class: "heading medium", style: "margin-top:8px; text-align:left;" }),
-                el("div", { style: "display:flex; justify-content:flex-end; margin-top:12px;" }, [
+                el("div", { style: "display:flex; justify-content:flex-end; gap:12px; margin-top:12px;" }, [
+                    el("button", { class: "cancel", id: "dappSpoofRejectBtn", "data-lang-key": "dapp-reject", role: "button", tabindex: "2" }, ["Reject"]),
                     el("button", { class: "large_button_container heading large", id: "dappSpoofNextBtn", "data-lang-key": "next", role: "button", tabindex: "3" }, ["Next"]),
                 ]),
             ]),

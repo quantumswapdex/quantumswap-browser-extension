@@ -202,6 +202,56 @@ export async function initApp(): Promise<void> {
 
     resumePostEula();
     resizeBoxes();
+    watchAccountBalanceFit();
+}
+
+// Shrink the home card's "Balance : <value>" line so very long values keep a
+// side gap inside the card instead of running edge to edge. Re-measured from
+// the markup's 20px base size so it grows back when the value shortens. The
+// label is white-space: nowrap (styles.css), so the measurement is the true
+// single-line width: without it a long value wraps and the wrapped rect
+// "fits", leaving the second line painted over the divider below.
+const BALANCE_BASE_FONT_PX = 20;
+const BALANCE_MIN_FONT_PX = 11;
+const BALANCE_SIDE_GAP_PX = 12;
+
+export function fitAccountBalance(): void {
+    const label = byId("totalBalance");
+    if (label == null || label.parentElement == null) return;
+    label.style.fontSize = BALANCE_BASE_FONT_PX + "px";
+    const available = label.parentElement.clientWidth - 2 * BALANCE_SIDE_GAP_PX;
+    if (available <= 0) return;
+    const width = label.getBoundingClientRect().width;
+    if (width <= available) return;
+    const scaledPx = Math.floor((BALANCE_BASE_FONT_PX * available) / width);
+    label.style.fontSize = Math.max(BALANCE_MIN_FONT_PX, scaledPx) + "px";
+}
+
+// Re-fit whenever the balance text changes or the container's size changes.
+// The container ResizeObserver is what makes the first paint work: the balance
+// is often written while the home screen is still display:none (first unlock,
+// wallet switch), where every measurement is 0; when the screen becomes
+// visible the container gains its real size and the observer re-fits. Neither
+// observer watches the label's style attribute (the only thing the fit
+// writes), so a re-fit cannot re-trigger itself.
+function watchAccountBalanceFit(): void {
+    const label = byId("totalBalance");
+    if (label == null || label.parentElement == null) return;
+    let scheduled = false;
+    const schedule = () => {
+        if (scheduled) return;
+        scheduled = true;
+        window.requestAnimationFrame(() => {
+            scheduled = false;
+            fitAccountBalance();
+        });
+    };
+    window.addEventListener("resize", schedule);
+    new MutationObserver(schedule).observe(label, { childList: true, characterData: true, subtree: true });
+    if (typeof ResizeObserver !== "undefined") {
+        new ResizeObserver(schedule).observe(label.parentElement);
+    }
+    schedule();
 }
 
 export function resizeBoxes(): void {
@@ -227,8 +277,11 @@ export function resizeBoxes(): void {
         tokensMaxHeight = "295px";
     } else if (screen.height >= 768) {
         maxHeight = "430px";
-        maxHeightMiddle = "480px";
-        tokensMaxHeight = "225px";
+        // Slightly shorter than the naive fit on 768px-tall monitors so the
+        // seed-words cards and the token list keep a visible gap above the
+        // window's bottom edge.
+        maxHeightMiddle = "450px";
+        tokensMaxHeight = "130px";
     } else if (screen.height >= 720) {
         maxHeight = "380px";
         maxHeightMiddle = "450px";
@@ -1476,6 +1529,21 @@ export function createOrRestoreWallet(): boolean {
     return false;
 }
 
+// True while the wallet was locked via the burger menu's Lock item. Pauses the
+// background balance refresher (it keeps rescheduling itself but does no work)
+// so it cannot repaint the balance or pop balance-change notifications over
+// the unlock screen. Cleared on the next successful unlock.
+let walletLocked = false;
+
+// Burger menu "Lock": return to the unlock screen. No decrypted key material
+// is held in memory to scrub (keys are re-decrypted per operation with the
+// password); showUnlockScreen also drops the popup's shared default address
+// and disables the wallet menu.
+export function lockWallet(): void {
+    walletLocked = true;
+    showUnlockScreen();
+}
+
 export function showUnlockScreen(): void {
     // Wallet is locked here; drop the shared default address for the popup.
     qcSessionClearAddress();
@@ -1522,6 +1590,7 @@ export async function decryptAndUnlockWallet(): Promise<boolean | void> {
         // screen shows, so the custom-release banner state is correct.
         await loadSwapReleases(password);
         hideWaitingBox();
+        walletLocked = false;
         byId("unlockScreen").style.display = "none";
         onboardingStore.additionalWalletMode = true;
         setWalletAddressAndShowWalletScreen(walletAddress);
@@ -1901,6 +1970,10 @@ export async function initRefreshAccountBalanceBackground(): Promise<void> {
 
 export async function refreshAccountBalanceBackground(): Promise<void> {
     try {
+        if (walletLocked == true) {
+            setTimeout(refreshAccountBalanceBackground, 10.0 * 1000);
+            return;
+        }
         if (walletStore.isRefreshingBalance == true) {
             setTimeout(refreshAccountBalanceBackground, 10.0 * 1000);
             return;

@@ -126,6 +126,19 @@ button, input[type="submit"], input[type="reset"] {
     font-size: 15px;
     position: relative;
     opacity: 1;
+    /* "Transactions" is a single long word; allow a mid-word break so it wraps
+       inside its 25%-wide tile instead of painting over the next label, and
+       keep wrapped lines tight (body sets line-height: 1.6rem). */
+    overflow-wrap: anywhere;
+    line-height: 1.2;
+}
+
+/* The generic .button rule below sets flex: 1, which makes the icon tiles grow
+   to fill the row height. When a label wraps to a second line that stretched
+   every tile into a tall rectangle; keep the home-screen tiles at their natural
+   (min-width/min-height 50px) square size instead. */
+.buttons-container .button {
+    flex: 0 0 auto;
 }
 
 /* Top-left burger menu (replaces the old bottom tab bar). Fixed so it overlays
@@ -275,6 +288,14 @@ button, input[type="submit"], input[type="reset"] {
     font-size: 0.9em;
 }
 
+/* Wallet addresses are single unbroken hex strings; break them mid-string so
+   they wrap inside their card instead of overflowing at narrow widths. */
+#walletAddress,
+#receiveWalletAddress {
+    word-break: break-all;
+    min-width: 0;
+}
+
 .wallet-address-container {
     display: flex;
     width: 100%;
@@ -288,6 +309,14 @@ button, input[type="submit"], input[type="reset"] {
     display: flex;
     width: 100%;
     text-align: left;
+}
+
+/* Keep "Balance : <value>" on one line: fitAccountBalance() (app.ts) shrinks
+   the font to fit, and this makes its width measurement the true single-line
+   width. Without it a long value wraps onto a second line that paints over
+   the divider below (the surrounding layout uses fixed heights). */
+#totalBalance {
+    white-space: nowrap;
 }
 
 .divider {
@@ -1480,6 +1509,8 @@ select {
 
 .buttonBox {
     width: calc(100% / 4);
+    /* Let the tile shrink below its label's min-content width (labels wrap). */
+    min-width: 0;
     display: flex;
     flex-direction: column;
     margin-top: 4px;
@@ -1496,6 +1527,20 @@ select {
     .buttonBox:active {
         color: #6610f2;
     }
+
+/* Holds the floated prev/next arrows (transactions) or a centered link
+   (wallets). The transactions container is 30% wide inline; keep room for both
+   50px arrows so they stay on one line, and clear the floats so the container
+   keeps its height. */
+.pagination-container {
+    min-width: 110px;
+}
+
+.pagination-container::after {
+    content: "";
+    display: block;
+    clear: both;
+}
 
 .prev-container {
     width: 50px;

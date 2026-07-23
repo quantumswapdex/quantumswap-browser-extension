@@ -106,11 +106,12 @@ html[data-view="approval"] .screen-scroll-box {
 
 /*
  * The shared .cancel button floats right with a negative top margin (tuned for the
- * confirm dialog). On the approval and redirector cards it sits in a normal flex
- * layout next to the primary button, so undo the float/offset.
+ * confirm dialog). On the approval, redirector and spoof-gate cards it sits in a
+ * normal flex layout next to the primary button, so undo the float/offset.
  */
 #dappApprovalRoot .cancel,
-#dappRedirectRoot .cancel {
+#dappRedirectRoot .cancel,
+#dappSpoofGateRoot .cancel {
     float: none;
     margin-top: 0;
 }
