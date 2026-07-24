@@ -1,7 +1,7 @@
 {
   "name": "quantumswap-browser-extension",
   "displayName": "QuantumSwap Browser Extension",
-  "version": "1.2.9",
+  "version": "1.2.10",
   "private": true,
   "type": "module",
   "description": "Self-custody QuantumCoin wallet with token swaps, dApp connectivity, and quantum-resistant security.",
